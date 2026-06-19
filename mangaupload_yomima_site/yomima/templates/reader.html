@@ -189,48 +189,50 @@ function decode(img, filename, tileSize) {
   const tiles = centerTiles(cols, rows);
   const n     = tiles.length;
 
-  // 第一層: seed_Bで復号（逆写像）
-  const shuffled_B = (() => {
-    const arr = tiles.slice();
-    const rng = new Xorshift32(seed_B);
+  /**
+   * seed から逆順列 inv を生成する。
+   * Python側: shuffled[i] = tiled[perm[i]]  （perm[i] 番を i 番に置く）
+   * 逆写像:   result[perm[i]] = shuffled[i]  → inv[perm[i]] = i
+   * つまり inv[i] 番のタイルを src として tiles[i] に描画する。
+   */
+  function makeInvPerm(seed) {
+    const perm = Array.from({length: n}, (_, i) => i);
+    const rng  = new Xorshift32(seed);
     for (let i = n - 1; i > 0; i--) {
       const j = randInt(rng, i + 1);
-      [arr[i], arr[j]] = [arr[j], arr[i]];
+      [perm[i], perm[j]] = [perm[j], perm[i]];
     }
-    return arr;
-  })();
+    const inv = new Int32Array(n);
+    for (let i = 0; i < n; i++) inv[perm[i]] = i;
+    return inv;
+  }
+
+  // 第一層: seed_Bで復号（逆順列）
+  const inv_B = makeInvPerm(seed_B);
 
   const tmp1 = document.createElement('canvas');
   tmp1.width = W; tmp1.height = H;
   const ctx1 = tmp1.getContext('2d');
   ctx1.drawImage(img, 0, 0);
   for (let i = 0; i < n; i++) {
-    const [sy, sx] = shuffled_B[i];
-    const [dy, dx] = tiles[i];
+    const [sy, sx] = tiles[inv_B[i]];   // src: inv_B[i] 番のタイル
+    const [dy, dx] = tiles[i];           // dst: i 番の位置
     ctx1.drawImage(img,
       sx * tileSize, sy * tileSize, tileSize, tileSize,
       dx * tileSize, dy * tileSize, tileSize, tileSize
     );
   }
 
-  // 第二層: seed_Aで復号（逆写像）
-  const shuffled_A = (() => {
-    const arr = tiles.slice();
-    const rng = new Xorshift32(seed_A);
-    for (let i = n - 1; i > 0; i--) {
-      const j = randInt(rng, i + 1);
-      [arr[i], arr[j]] = [arr[j], arr[i]];
-    }
-    return arr;
-  })();
+  // 第二層: seed_Aで復号（逆順列）
+  const inv_A = makeInvPerm(seed_A);
 
   const cv2  = document.createElement('canvas');
   cv2.width  = W; cv2.height = H;
   const ctx2 = cv2.getContext('2d');
   ctx2.drawImage(tmp1, 0, 0);
   for (let i = 0; i < n; i++) {
-    const [sy, sx] = shuffled_A[i];
-    const [dy, dx] = tiles[i];
+    const [sy, sx] = tiles[inv_A[i]];   // src: inv_A[i] 番のタイル
+    const [dy, dx] = tiles[i];           // dst: i 番の位置
     ctx2.drawImage(tmp1,
       sx * tileSize, sy * tileSize, tileSize, tileSize,
       dx * tileSize, dy * tileSize, tileSize, tileSize
