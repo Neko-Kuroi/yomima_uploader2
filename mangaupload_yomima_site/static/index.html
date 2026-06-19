@@ -1,0 +1,923 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>マンガプラットフォーム</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:"Noto Sans JP",sans-serif;background:#f3f4f6;color:#333;min-height:100vh}
+    nav{background:#1e293b;padding:14px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+    nav .logo{color:#fff;font-weight:700;font-size:1.1rem;margin-right:8px}
+    nav a{color:#94a3b8;font-size:.85rem;text-decoration:none;cursor:pointer;padding:4px 10px;border-radius:4px;transition:background .15s}
+    nav a:hover{background:#334155;color:#fff}
+    #login-status{margin-left:auto;color:#38bdf8;font-size:.8rem}
+    .container{max-width:860px;margin:28px auto;background:#fff;padding:28px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.07)}
+    .page{display:none}.page.active{display:block}
+    h2{font-size:1.15rem;margin-bottom:18px;color:#1e293b}
+    h3{font-size:.95rem;margin-bottom:12px;color:#334155}
+    .form-group{margin-bottom:14px}
+    .form-group label{display:block;font-size:.82rem;font-weight:600;margin-bottom:4px;color:#475569}
+    .form-group input,.form-group select,.form-group textarea{width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:4px;font-size:.88rem;font-family:inherit}
+    .form-group textarea{resize:vertical;min-height:60px}
+    .btn{display:inline-flex;align-items:center;gap:.3em;padding:8px 18px;border:none;border-radius:4px;font-size:.84rem;font-weight:600;cursor:pointer;transition:background .15s}
+    .btn-primary{background:#2563eb;color:#fff}.btn-primary:hover{background:#1d4ed8}
+    .btn-success{background:#10b981;color:#fff}.btn-success:hover{background:#059669}
+    .btn-danger{background:#ef4444;color:#fff}.btn-danger:hover{background:#dc2626}
+    .btn-ghost{background:#f1f5f9;color:#475569;border:1px solid #cbd5e1}.btn-ghost:hover{background:#e2e8f0}
+    .btn:disabled{background:#9ca3af;cursor:not-allowed}
+    .btn-block{width:100%;justify-content:center}
+    .drop-zone{border:2px dashed #cbd5e1;padding:24px;text-align:center;border-radius:6px;cursor:pointer;background:#f8fafc;font-size:.88rem;color:#64748b;transition:background .15s}
+    .drop-zone:hover{background:#f1f5f9}
+    .badge{display:inline-block;padding:2px 8px;font-size:.72rem;font-weight:700;border-radius:9999px;color:#fff}
+    .badge-published{background:#10b981}.badge-draft{background:#94a3b8}
+    .badge-free{background:#3b82f6}.badge-premium{background:#f59e0b}
+    .work-card{border:1px solid #e2e8f0;border-radius:6px;padding:16px;margin-bottom:12px;background:#fafafa}
+    .work-card-header{display:flex;align-items:flex-start;gap:12px}
+    .work-card-cover{width:60px;height:90px;object-fit:cover;border-radius:4px;background:#e2e8f0;flex-shrink:0}
+    .work-card-cover-placeholder{width:60px;height:90px;background:#e2e8f0;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:1.5rem;flex-shrink:0}
+    .work-card-info{flex:1;min-width:0}
+    .work-card-title{font-size:.95rem;font-weight:700;color:#1e293b;margin-bottom:3px}
+    .work-card-sub{font-size:.77rem;color:#64748b;margin-top:4px}
+    .work-card-caption{font-size:.8rem;color:#475569;margin-top:6px;line-height:1.5}
+    .work-card-note{font-size:.78rem;color:#92400e;background:#fef3c7;border:1px solid #fde68a;border-radius:4px;padding:4px 8px;margin-top:6px}
+    .work-card-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+    .modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000;align-items:center;justify-content:center;overflow-y:auto;padding:20px}
+    .modal-overlay.open{display:flex}
+    .modal{background:#fff;border-radius:8px;padding:24px;width:min(560px,92vw);box-shadow:0 8px 32px rgba(0,0,0,.18)}
+    .modal h3{margin-bottom:16px}
+    .modal-footer{display:flex;gap:8px;justify-content:flex-end;margin-top:20px}
+    .msg{font-size:.82rem;padding:8px 12px;border-radius:4px;margin-top:10px;display:block}
+    .msg-error{background:#fef2f2;color:#dc2626;border:1px solid #fecaca}
+    .msg-success{background:#f0fdf4;color:#16a34a;border:1px solid #bbf7d0}
+    .msg-info{color:#64748b;font-size:.8rem;margin-top:6px}
+    .divider{border:none;border-top:1px solid #e2e8f0;margin:20px 0}
+    .empty-state{text-align:center;padding:40px;color:#94a3b8;font-size:.88rem;border:1px dashed #e2e8f0;border-radius:6px}
+    .viewer-url-bar{background:#1e293b;color:#94a3b8;font-size:.78rem;padding:8px 20px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+    .viewer-url-bar input{flex:1;min-width:200px;padding:4px 8px;border-radius:4px;border:1px solid #334155;background:#0f172a;color:#e2e8f0;font-size:.78rem}
+    /* プログレスバー */
+    .progress-wrap{background:#e2e8f0;border-radius:4px;height:8px;overflow:hidden;margin-top:8px}
+    .progress-bar{height:100%;background:#2563eb;border-radius:4px;transition:width .2s ease;width:0%}
+    .progress-label{font-size:.78rem;color:#475569;margin-top:4px}
+    /* 公開作品カード */
+    .catalog-card{border:1px solid #e2e8f0;border-radius:8px;padding:16px;margin-bottom:12px;background:#fff;display:flex;gap:14px;align-items:flex-start}
+    .catalog-cover{width:80px;height:120px;object-fit:cover;border-radius:4px;background:#e2e8f0;flex-shrink:0}
+    .catalog-cover-placeholder{width:80px;height:120px;background:#e2e8f0;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:2rem;flex-shrink:0}
+    .catalog-info{flex:1;min-width:0}
+    .catalog-title{font-size:1rem;font-weight:700;color:#1e293b;margin-bottom:4px}
+    .catalog-sub{font-size:.78rem;color:#64748b;margin-bottom:6px}
+    .catalog-caption{font-size:.82rem;color:#475569;line-height:1.6}
+    /* タグ */
+    .catalog-tag{display:inline-block;padding:2px 8px;border-radius:9999px;font-size:.72rem;transition:opacity .15s}
+    .catalog-tag:hover{opacity:.75}
+    .catalog-tag-genre{background:#ede9fe;color:#5b21b6;border:1px solid #ddd6fe}
+    .catalog-tag-motif{background:#f0f9ff;color:#0369a1;border:1px solid #bae6fd}
+    .genre-filter-btn{padding:4px 10px;border-radius:9999px;font-size:.75rem;cursor:pointer;border:1px solid #cbd5e1;background:#f8fafc;color:#475569;transition:all .15s}
+    .genre-filter-btn.active{background:#5b21b6;border-color:#5b21b6;color:#fff}
+    /* スクランブル設定 */
+    .scramble-option{display:flex;align-items:center;gap:8px;padding:10px 12px;border:1px solid #cbd5e1;border-radius:4px;cursor:pointer;transition:background .15s}
+    .scramble-option:hover{background:#f8fafc}
+    .scramble-option input{width:auto}
+  </style>
+</head>
+<body>
+
+<nav>
+  <span class="logo">📚 マンガプラットフォーム</span>
+  <a onclick="showPage('search-page'); loadPublishedManga();">🔍 公開作品</a>
+  <a onclick="requireLogin('works-page'); loadMyWorks();">📋 マイ作品</a>
+  <a onclick="showPage('upload-page')">📤 アップロード</a>
+  <a onclick="showPage('auth-page')">🔐 アカウント</a>
+  <span id="login-status">未ログイン</span>
+</nav>
+
+<div class="viewer-url-bar">
+  <span>👁 ビューワーURL:</span>
+  <input type="url" id="viewer-url-input" placeholder="https://xxxx.trycloudflare.com">
+  <button class="btn btn-ghost" onclick="applyViewerUrl()" style="color:#e2e8f0;border-color:#475569">設定</button>
+  <span id="viewer-url-status" style="color:#38bdf8"></span>
+</div>
+
+<!-- 公開作品一覧 -->
+<div id="search-page" class="container page active">
+  <h2>🔍 公開中の作品</h2>
+  <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+    <input type="text" id="search-text" placeholder="タイトル・タグで検索…" style="flex:1;min-width:180px;padding:7px 10px;border:1px solid #cbd5e1;border-radius:4px;font-size:.88rem" oninput="filterCatalog()">
+    <button class="btn btn-ghost" onclick="loadPublishedManga()">🔄 更新</button>
+  </div>
+  <div id="genre-filter" style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:14px"></div>
+  <div id="manga-list"><div class="empty-state">読み込み中…</div></div>
+</div>
+
+<!-- マイ作品管理 -->
+<div id="works-page" class="container page">
+  <h2>📋 マイ作品管理</h2>
+  <button class="btn btn-ghost" onclick="loadMyWorks()" style="margin-bottom:16px">🔄 更新</button>
+  <div id="works-list"><div class="empty-state">読み込み中…</div></div>
+</div>
+
+<!-- アップロード -->
+<div id="upload-page" class="container page">
+  <h2>📤 原稿アップロード</h2>
+  <p id="upload-warn" class="msg msg-error" style="display:none">⚠️ 先にログインしてください</p>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+    <div class="form-group">
+      <label>作品タイトル名</label>
+      <input type="text" id="title_name" placeholder="例: 鬼の城">
+    </div>
+    <div class="form-group">
+      <label>エピソード名</label>
+      <input type="text" id="episode_name" placeholder="例: 第1話">
+    </div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+    <div class="form-group">
+      <label>作品ID</label>
+      <input type="number" id="title_id" value="1" min="1">
+    </div>
+    <div class="form-group">
+      <label>エピソードID</label>
+      <input type="number" id="episode_id" value="1" min="1">
+    </div>
+  </div>
+  <div class="form-group">
+    <label>キャプション <span style="font-weight:400;color:#94a3b8">（任意・公開）</span></label>
+    <textarea id="caption" placeholder="作品の紹介文"></textarea>
+  </div>
+  <div class="form-group">
+    <label>作者コメント <span style="font-weight:400;color:#94a3b8">（任意・公開）</span></label>
+    <textarea id="comment" placeholder="読者へのコメント"></textarea>
+  </div>
+  <div class="form-group">
+    <label>備考 <span style="font-weight:400;color:#92400e">（非公開・自分のみ）</span></label>
+    <textarea id="note" placeholder="管理メモ、素材フォルダパスなど"></textarea>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+    <div class="form-group">
+      <label>公開状態</label>
+      <select id="status_select">
+        <option value="draft">下書き（非公開）</option>
+        <option value="published">公開</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>アクセス権限</label>
+      <select id="access_level_select">
+        <option value="public">無料公開</option>
+        <option value="premium">有料会員限定</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>レーティング</label>
+      <select id="rating_select">
+        <option value="General">General（全年齢）</option>
+        <option value="Teen">Teen（15歳以上）</option>
+        <option value="Mature">Mature（成人向け）</option>
+        <option value="Adult">Adult（R18）</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- 警告タグ -->
+  <div class="form-group">
+    <label>⚠️ 警告タグ <span style="font-weight:400;color:#94a3b8">（該当するものにチェック）</span></label>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:6px">
+      <label style="display:flex;align-items:center;gap:5px;font-size:.84rem;cursor:pointer">
+        <input type="checkbox" class="warning-check" value="暴力" style="width:auto"> 暴力
+      </label>
+      <label style="display:flex;align-items:center;gap:5px;font-size:.84rem;cursor:pointer">
+        <input type="checkbox" class="warning-check" value="性暴力" style="width:auto"> 性暴力
+      </label>
+      <label style="display:flex;align-items:center;gap:5px;font-size:.84rem;cursor:pointer">
+        <input type="checkbox" class="warning-check" value="自傷" style="width:auto"> 自傷
+      </label>
+      <label style="display:flex;align-items:center;gap:5px;font-size:.84rem;cursor:pointer">
+        <input type="checkbox" class="warning-check" value="死" style="width:auto"> 死
+      </label>
+    </div>
+  </div>
+
+  <!-- ジャンルタグ -->
+  <div class="form-group">
+    <label>🏷 ジャンルタグ <span style="font-weight:400;color:#94a3b8">（複数選択可）</span></label>
+    <div id="genre-tag-area" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px"></div>
+  </div>
+
+  <!-- モチーフタグ -->
+  <div class="form-group">
+    <label>🔖 モチーフタグ <span style="font-weight:400;color:#94a3b8">（作品の中にあるもの・自由入力・Enterで追加）</span></label>
+    <div style="display:flex;gap:6px;margin-top:6px">
+      <input type="text" id="motif-tag-input" placeholder="例: 変身、官僚、キノコ" style="flex:1">
+      <button class="btn btn-ghost" onclick="addMotifTag()" type="button">追加</button>
+    </div>
+    <div id="motif-tag-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px"></div>
+  </div>
+
+
+  <!-- スクランブル設定 -->
+  <div class="form-group">
+    <label>🔒 画像スクランブル</label>
+    <div style="display:flex;gap:8px;margin-top:4px">
+      <label class="scramble-option" style="flex:1">
+        <input type="radio" name="scramble" value="1" checked> する（推奨）
+      </label>
+      <label class="scramble-option" style="flex:1">
+        <input type="radio" name="scramble" value="0"> しない
+      </label>
+    </div>
+    <div style="margin-top:8px;display:flex;align-items:center;gap:8px">
+      <label style="font-size:.82rem;color:#475569;font-weight:600">タイルサイズ:</label>
+      <select id="tile_size" style="width:auto;padding:4px 8px;border:1px solid #cbd5e1;border-radius:4px;font-size:.82rem">
+        <option value="16" selected>16px（推奨）</option>
+        <option value="8">8px（高強度）</option>
+        <option value="32">32px（軽量）</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Webhook設定 -->
+  <div class="form-group">
+    <label>
+      <input type="checkbox" id="webhook_enabled" style="width:auto;margin-right:6px">
+      Discord Webhook送信を許可する
+    </label>
+  </div>
+
+  <!-- バンプ画像 -->
+  <div class="form-group">
+    <label>🖼 バンプ画像（表紙）<span style="font-weight:400;color:#94a3b8"> 任意・5MBまで</span></label>
+    <div class="drop-zone" id="cover-drop-zone">
+      <p>表紙画像をドロップ、またはクリックして選択</p>
+      <input type="file" id="cover-input" accept="image/*" style="display:none">
+    </div>
+    <div id="cover-preview" style="margin-top:8px"></div>
+  </div>
+
+  <!-- 原稿画像 -->
+  <div class="form-group">
+    <label>📄 原稿画像（複数可）<span style="font-weight:400;color:#94a3b8"> 1枚10MBまで・合計100MBまで</span></label>
+    <div class="drop-zone" id="drop-zone">
+      <p>原稿画像をドロップ、またはクリックして選択</p>
+      <input type="file" id="file-input" multiple accept="image/*" style="display:none">
+    </div>
+    <div id="file-list" class="msg-info"></div>
+  </div>
+
+  <button id="upload-btn" class="btn btn-primary btn-block" onclick="startUpload()" disabled style="margin-top:14px">
+    アップロード開始
+  </button>
+
+  <!-- プログレス表示 -->
+  <div id="progress-area" style="display:none;margin-top:16px">
+    <div id="progress-phase" style="font-size:.84rem;font-weight:600;color:#1e293b;margin-bottom:4px"></div>
+    <div class="progress-wrap"><div class="progress-bar" id="progress-bar"></div></div>
+    <div class="progress-label" id="progress-label"></div>
+  </div>
+  <div id="upload-status" style="margin-top:10px"></div>
+</div>
+
+<!-- アカウント -->
+<div id="auth-page" class="container page">
+  <h2>🔐 アカウント管理</h2>
+  <div style="max-width:400px">
+    <h3>ログイン</h3>
+    <div class="form-group"><label>ユーザー名</label><input type="text" id="login-user"></div>
+    <div class="form-group"><label>パスワード</label><input type="password" id="login-pass"></div>
+    <button class="btn btn-primary btn-block" onclick="handleLogin()">ログインする</button>
+    <div id="login-msg" style="margin-top:8px"></div>
+    <hr class="divider">
+    <h3>新規アカウント作成</h3>
+    <div class="form-group"><label>ユーザー名</label><input type="text" id="reg-user" placeholder="taro_manga"></div>
+    <div class="form-group"><label>メールアドレス</label><input type="email" id="reg-email" placeholder="test@example.com"></div>
+    <div class="form-group"><label>パスワード</label><input type="password" id="reg-pass" placeholder="8文字以上"></div>
+    <button class="btn btn-success btn-block" onclick="handleSignup()">アカウントを登録</button>
+    <div id="signup-msg" style="margin-top:8px"></div>
+  </div>
+</div>
+
+<!-- 編集モーダル -->
+<div id="edit-modal" class="modal-overlay">
+  <div class="modal">
+    <h3>✏️ エピソード編集</h3>
+    <input type="hidden" id="edit-title-id">
+    <input type="hidden" id="edit-episode-id">
+    <input type="hidden" id="edit-public-id">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label>作品タイトル名</label><input type="text" id="edit-title-name"></div>
+      <div class="form-group"><label>エピソード名</label><input type="text" id="edit-episode-name"></div>
+    </div>
+    <div class="form-group"><label>キャプション</label><textarea id="edit-caption"></textarea></div>
+    <div class="form-group"><label>作者コメント</label><textarea id="edit-comment"></textarea></div>
+    <div class="form-group"><label>備考（非公開）</label><textarea id="edit-note"></textarea></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group">
+        <label>公開状態</label>
+        <select id="edit-status">
+          <option value="draft">下書き（非公開）</option>
+          <option value="published">公開</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>アクセス権限</label>
+        <select id="edit-access">
+          <option value="public">無料公開</option>
+          <option value="premium">有料会員限定</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label><input type="checkbox" id="edit-webhook" style="width:auto;margin-right:6px">Discord Webhook送信を許可する</label>
+    </div>
+    <div id="edit-msg" style="margin-top:8px"></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeEditModal()">キャンセル</button>
+      <button class="btn btn-primary" onclick="saveEdit()">💾 保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 削除確認モーダル -->
+<div id="delete-modal" class="modal-overlay">
+  <div class="modal">
+    <h3>🗑️ 削除の確認</h3>
+    <p style="font-size:.88rem;color:#475569;margin-bottom:4px">以下のエピソードを削除します。この操作は取り消せません。</p>
+    <p id="delete-target-name" style="font-weight:700;margin:12px 0;color:#1e293b"></p>
+    <input type="hidden" id="delete-public-id">
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeDeleteModal()">キャンセル</button>
+      <button class="btn btn-danger" onclick="confirmDelete()">削除する</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let token = "";
+let selectedFiles = [];
+let selectedCover = null;
+let platformBaseUrl = "";
+let viewerBaseUrl   = "";
+
+/* ── 起動時設定取得 ── */
+async function initConfig() {
+  try {
+    const res = await fetch("/api/config");
+    const cfg = await res.json();
+    platformBaseUrl = cfg.platform_base_url.replace(/\/$/, "");
+  } catch(e) {
+    platformBaseUrl = window.location.origin;
+  }
+}
+
+/* ── ビューワーURL設定 ── */
+function applyViewerUrl() {
+  const val = document.getElementById("viewer-url-input").value.trim().replace(/\/$/, "");
+  if (!val) return;
+  viewerBaseUrl = val;
+  document.getElementById("viewer-url-status").textContent = "✅ 設定済み";
+  loadPublishedManga();
+  if (token) loadMyWorks();
+}
+
+/* ── ページ切替 ── */
+function showPage(pageId) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById(pageId).classList.add('active');
+}
+function requireLogin(pageId) {
+  if (!token) { showPage('auth-page'); showMsg('login-msg','error','ログインが必要です'); return; }
+  showPage(pageId);
+}
+
+/* ── メッセージ ── */
+function showMsg(id, type, text) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.className = `msg msg-${type}`;
+  el.textContent = text;
+  el.style.display = 'block';
+}
+
+/* ── 認証 ── */
+async function handleLogin() {
+  const fd = new FormData();
+  fd.append("username", document.getElementById("login-user").value);
+  fd.append("password", document.getElementById("login-pass").value);
+  try {
+    const res  = await fetch("/api/auth/token", { method: "POST", body: fd });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "ログイン失敗");
+    token = data.access_token;
+    document.getElementById("login-status").textContent = `👤 ${data.username}`;
+    document.getElementById("upload-warn").style.display = "none";
+    showMsg('login-msg','success', `${data.username} としてログインしました`);
+    showPage('works-page');
+    loadMyWorks();
+  } catch(e) { showMsg('login-msg','error', e.message); }
+}
+
+async function handleSignup() {
+  const payload = {
+    username: document.getElementById("reg-user").value,
+    email:    document.getElementById("reg-email").value,
+    password: document.getElementById("reg-pass").value,
+  };
+  try {
+    const res  = await fetch("/api/auth/signup", {
+      method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "登録エラー");
+    showMsg('signup-msg','success', data.message);
+  } catch(e) { showMsg('signup-msg','error', e.message); }
+}
+
+/* ── 公開作品一覧 ── */
+
+
+/* ── カタログ フィルタ ── */
+let catalogAllItems = [];
+let activeGenreFilter = null;
+
+async function loadPublishedManga() {
+  const el = document.getElementById("manga-list");
+  el.innerHTML = '<div class="empty-state">読み込み中…</div>';
+  try {
+    const res = await fetch("/api/public/catalog");
+    if (res.status === 429) {
+      el.innerHTML = '<div class="empty-state">しばらく待ってから更新してください</div>';
+      return;
+    }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    catalogAllItems = await res.json();
+    buildGenreFilterButtons();
+    renderCatalog();
+  } catch(e) { el.innerHTML = `<div class="empty-state">読み込みエラー: ${e.message}</div>`; }
+}
+
+function buildGenreFilterButtons() {
+  const area = document.getElementById('genre-filter');
+  if (!area) return;
+  const genres = new Set();
+  catalogAllItems.forEach(m => (m.genre_tags||[]).forEach(t => genres.add(t)));
+  area.innerHTML = [...genres].map(g =>
+    `<button class="genre-filter-btn${activeGenreFilter===g?' active':''}" onclick="toggleGenreFilter('${g}')">${g}</button>`
+  ).join('');
+}
+
+function toggleGenreFilter(genre) {
+  activeGenreFilter = activeGenreFilter === genre ? null : genre;
+  buildGenreFilterButtons();
+  renderCatalog();
+}
+
+function clickCatalogTag(tag) {
+  activeGenreFilter = activeGenreFilter === tag ? null : tag;
+  buildGenreFilterButtons();
+  renderCatalog();
+}
+
+function filterCatalog() { renderCatalog(); }
+
+function renderCatalog() {
+  const el   = document.getElementById("manga-list");
+  const text = (document.getElementById('search-text')?.value||'').toLowerCase();
+  let items  = catalogAllItems;
+
+  // ジャンルフィルタ
+  if (activeGenreFilter) {
+    items = items.filter(m =>
+      (m.genre_tags||[]).includes(activeGenreFilter) ||
+      (m.motif_tags||[]).includes(activeGenreFilter)
+    );
+  }
+  // テキスト検索（タイトル・ジャンルタグ・モチーフタグ）
+  if (text) {
+    items = items.filter(m => {
+      const haystack = [
+        m.title_name, m.episode_name, m.author_name,
+        ...(m.genre_tags||[]), ...(m.motif_tags||[])
+      ].join(' ').toLowerCase();
+      return haystack.includes(text);
+    });
+  }
+
+  if (!items.length) {
+    el.innerHTML = '<div class="empty-state">該当する作品がありません</div>';
+    return;
+  }
+
+  const ratingColor = {General:'#10b981',Teen:'#3b82f6',Mature:'#f59e0b',Adult:'#ef4444'};
+  el.innerHTML = items.map(m => {
+    const title   = esc(m.title_name   || `作品${m.title_id}`);
+    const episode = esc(m.episode_name || `エピソード${m.episode_id}`);
+    const canRead = viewerBaseUrl && m.cbz_url;
+    const coverHtml = m.cover_url
+      ? `<img class="catalog-cover" src="${esc(m.cover_url)}" alt="cover">`
+      : `<div class="catalog-cover-placeholder">📖</div>`;
+    const warningHtml = (m.warnings||[]).map(w =>
+      `<span style="font-size:.7rem;padding:2px 6px;border-radius:3px;background:#fef2f2;color:#dc2626;border:1px solid #fecaca">${esc(w)}</span>`
+    ).join('');
+    const genreHtml = (m.genre_tags||[]).map(t =>
+      `<span class="catalog-tag catalog-tag-genre" onclick="clickCatalogTag('${esc(t)}')" style="cursor:pointer">${esc(t)}</span>`
+    ).join('');
+    const motifHtml = (m.motif_tags||[]).map(t =>
+      `<span class="catalog-tag catalog-tag-motif" onclick="clickCatalogTag('${esc(t)}')" style="cursor:pointer">${esc(t)}</span>`
+    ).join('');
+    return `
+      <div class="catalog-card">
+        ${coverHtml}
+        <div class="catalog-info">
+          <div class="catalog-title">${title} — ${episode}</div>
+          <div class="catalog-sub">
+            👤 ${esc(m.author_name)} &nbsp;
+            <span class="badge ${m.access_level==='public'?'badge-free':'badge-premium'}">${m.access_level==='public'?'無料':'PREMIUM'}</span>
+            &nbsp;<span style="font-size:.7rem;padding:2px 7px;border-radius:3px;background:${ratingColor[m.rating]||'#94a3b8'};color:#fff">${esc(m.rating||'General')}</span>
+            ${warningHtml ? `&nbsp;${warningHtml}` : ''}
+          </div>
+          ${(genreHtml||motifHtml) ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px">${genreHtml}${motifHtml}</div>` : ''}
+          ${m.caption ? `<div class="catalog-caption">${esc(m.caption)}</div>` : ''}
+          ${canRead ? `<button class="btn btn-primary" style="margin-top:10px" onclick="openViewer('${esc(m.cbz_url)}')">📖 読む</button>`
+                    : `<span style="font-size:.75rem;color:#94a3b8;margin-top:8px;display:block">ビューワーURL未設定</span>`}
+        </div>
+      </div>`;
+  }).join('');
+}
+
+/* ── マイ作品一覧 ── */
+async function loadMyWorks() {
+  if (!token) return;
+  const el = document.getElementById("works-list");
+  el.innerHTML = '<div class="empty-state">読み込み中…</div>';
+  try {
+    const res   = await fetch("/api/author/works", { headers: {"Authorization":`Bearer ${token}`} });
+    if (!res.ok) throw new Error("取得失敗");
+    const works = await res.json();
+    if (!works.length) {
+      el.innerHTML = '<div class="empty-state">まだ作品がありません。アップロードページから投稿してください。</div>';
+      return;
+    }
+    el.innerHTML = works.map(w => {
+      const titleLabel   = esc(w.title_name   || `作品${w.title_id}`);
+      const episodeLabel = esc(w.episode_name || `エピソード${w.episode_id}`);
+      const isPublished  = w.status === 'published';
+      const previewUrl   = w.public_id ? `${platformBaseUrl}/api/author/preview/${w.public_id}.cbz?token=${encodeURIComponent(token)}` : null;
+      const canPreview   = viewerBaseUrl && w.has_cbz && w.public_id;
+      const coverHtml    = w.has_cover
+        ? `<img class="work-card-cover" src="${platformBaseUrl}/api/public/cover/${w.public_id}" alt="cover">`
+        : `<div class="work-card-cover-placeholder">📖</div>`;
+      return `
+        <div class="work-card">
+          <div class="work-card-header">
+            ${coverHtml}
+            <div class="work-card-info">
+              <div class="work-card-title">${titleLabel} — ${episodeLabel}</div>
+              <div class="work-card-sub">
+                <span class="badge ${isPublished?'badge-published':'badge-draft'}">${isPublished?'公開中':'下書き'}</span>
+                &nbsp;
+                <span class="badge ${w.access_level==='public'?'badge-free':'badge-premium'}">${w.access_level==='public'?'無料':'PREMIUM'}</span>
+                ${w.scrambled ? ' &nbsp;<span style="font-size:.72rem;color:#7c3aed">🔒 スクランブル済</span>' : ''}
+                ${!w.has_cbz  ? ' &nbsp;<span style="color:#ef4444;font-size:.75rem">⚠ CBZ未生成</span>' : ''}
+                ${isPublished ? ` &nbsp;<span style="font-size:.78rem;color:#64748b">👁 ${(w.view_count||0).toLocaleString()} views</span>` : ''}
+              </div>
+              ${w.caption ? `<div class="work-card-caption">${esc(w.caption)}</div>` : ''}
+              ${w.note    ? `<div class="work-card-note">📝 ${esc(w.note)}</div>` : ''}
+            </div>
+          </div>
+          <div class="work-card-actions">
+            <button class="btn btn-ghost" onclick='openEditModal(${w.title_id},${w.episode_id},${JSON.stringify(w)})'>✏️ 編集</button>
+            ${canPreview ? `<button class="btn btn-ghost" onclick="openPreview('${previewUrl}')">👁 プレビュー</button>` : ''}
+            <button class="btn btn-danger" style="margin-left:auto" onclick="openDeleteModal('${w.public_id}','${titleLabel} — ${episodeLabel}')">🗑 削除</button>
+          </div>
+        </div>`;
+    }).join('');
+  } catch(e) { el.innerHTML = `<div class="empty-state">エラー: ${e.message}</div>`; }
+}
+
+/* ── ビューワー連携 ── */
+function openViewer(cbzUrl) {
+  if (!viewerBaseUrl) { alert("ビューワーURLを設定してください"); return; }
+  window.open(`${viewerBaseUrl}/reader?${new URLSearchParams({url:cbzUrl})}`, '_blank');
+}
+function openPreview(previewUrl) {
+  if (!viewerBaseUrl) { alert("ビューワーURLを設定してください"); return; }
+  window.open(`${viewerBaseUrl}/reader?${new URLSearchParams({url:previewUrl})}`, '_blank');
+}
+
+/* ── 編集モーダル ── */
+function openEditModal(titleId, episodeId, w) {
+  document.getElementById('edit-title-id').value     = titleId;
+  document.getElementById('edit-episode-id').value   = episodeId;
+  document.getElementById('edit-public-id').value    = w.public_id || '';
+  document.getElementById('edit-title-name').value   = w.title_name   || '';
+  document.getElementById('edit-episode-name').value = w.episode_name || '';
+  document.getElementById('edit-caption').value      = w.caption      || '';
+  document.getElementById('edit-comment').value      = w.comment      || '';
+  document.getElementById('edit-note').value         = w.note         || '';
+  document.getElementById('edit-status').value       = w.status;
+  document.getElementById('edit-access').value       = w.access_level;
+  document.getElementById('edit-webhook').checked    = !!w.webhook_enabled;
+  document.getElementById('edit-msg').textContent    = '';
+  document.getElementById('edit-modal').classList.add('open');
+}
+function closeEditModal() { document.getElementById('edit-modal').classList.remove('open'); }
+
+async function saveEdit() {
+  const titleId   = document.getElementById('edit-title-id').value;
+  const episodeId = document.getElementById('edit-episode-id').value;
+  const publicId  = document.getElementById('edit-public-id').value;
+  const payload = {
+    title_name:      document.getElementById('edit-title-name').value,
+    episode_name:    document.getElementById('edit-episode-name').value,
+    caption:         document.getElementById('edit-caption').value,
+    comment:         document.getElementById('edit-comment').value,
+    note:            document.getElementById('edit-note').value,
+    status:          document.getElementById('edit-status').value,
+    access_level:    document.getElementById('edit-access').value,
+    webhook_enabled: document.getElementById('edit-webhook').checked,
+    price: 0,
+    scrambled: true, tile_size: 16,
+  };
+  try {
+    const res  = await fetch(`/api/author/titles/${titleId}/episodes/${episodeId}/settings`, {
+      method:'PATCH', headers:{'Content-Type':'application/json','Authorization':`Bearer ${token}`},
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || '保存失敗');
+    showMsg('edit-msg','success','保存しました');
+    setTimeout(() => { closeEditModal(); loadMyWorks(); }, 800);
+  } catch(e) { showMsg('edit-msg','error', e.message); }
+}
+
+/* ── 削除モーダル ── */
+function openDeleteModal(publicId, label) {
+  document.getElementById('delete-public-id').value = publicId;
+  document.getElementById('delete-target-name').textContent = label;
+  document.getElementById('delete-modal').classList.add('open');
+}
+function closeDeleteModal() { document.getElementById('delete-modal').classList.remove('open'); }
+
+async function confirmDelete() {
+  const publicId = document.getElementById('delete-public-id').value;
+  try {
+    const res  = await fetch(`/api/author/episodes/${publicId}`, {
+      method:'DELETE', headers:{'Authorization':`Bearer ${token}`}
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || '削除失敗');
+    closeDeleteModal();
+    loadMyWorks();
+  } catch(e) { alert('削除エラー: ' + e.message); }
+}
+
+/* ── ファイル選択（原稿） ── */
+const dropZone  = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+dropZone.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', e => handleFiles(e.target.files));
+dropZone.addEventListener('dragover',  e => { e.preventDefault(); dropZone.style.background='#e2e8f0'; });
+dropZone.addEventListener('dragleave', () => dropZone.style.background='#f8fafc');
+dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.style.background='#f8fafc'; handleFiles(e.dataTransfer.files); });
+
+const MAX_PAGE_MB  = 10;
+const MAX_TOTAL_MB = 100;
+
+function handleFiles(files) {
+  const imgs = Array.from(files).filter(f => f.type.startsWith('image/'));
+  let totalSize = 0;
+  const errors  = [];
+
+  for (const f of imgs) {
+    if (f.size > MAX_PAGE_MB * 1024 * 1024) {
+      errors.push(`${f.name} が ${MAX_PAGE_MB}MB を超えています`);
+    }
+    totalSize += f.size;
+  }
+  if (totalSize > MAX_TOTAL_MB * 1024 * 1024) {
+    errors.push(`合計サイズが ${MAX_TOTAL_MB}MB を超えています`);
+  }
+
+  if (errors.length) {
+    document.getElementById('file-list').innerHTML =
+      `<span style="color:#dc2626">${errors.join('<br>')}</span>`;
+    selectedFiles = [];
+    document.getElementById('upload-btn').disabled = true;
+    return;
+  }
+
+  selectedFiles = imgs;
+  document.getElementById('file-list').textContent =
+    `${imgs.length} 枚 / 合計 ${(totalSize/1024/1024).toFixed(1)}MB`;
+  document.getElementById('upload-btn').disabled = imgs.length === 0 || !token;
+}
+
+/* ── ファイル選択（バンプ画像） ── */
+const coverDropZone = document.getElementById('cover-drop-zone');
+const coverInput    = document.getElementById('cover-input');
+coverDropZone.addEventListener('click', () => coverInput.click());
+coverInput.addEventListener('change', e => handleCover(e.target.files[0]));
+coverDropZone.addEventListener('dragover',  e => { e.preventDefault(); coverDropZone.style.background='#e2e8f0'; });
+coverDropZone.addEventListener('dragleave', () => coverDropZone.style.background='#f8fafc');
+coverDropZone.addEventListener('drop', e => { e.preventDefault(); coverDropZone.style.background='#f8fafc'; handleCover(e.dataTransfer.files[0]); });
+
+function handleCover(file) {
+  if (!file || !file.type.startsWith('image/')) return;
+  if (file.size > 5 * 1024 * 1024) {
+    document.getElementById('cover-preview').innerHTML =
+      '<span style="color:#dc2626;font-size:.82rem">バンプ画像が5MBを超えています</span>';
+    selectedCover = null;
+    return;
+  }
+  selectedCover = file;
+  const url = URL.createObjectURL(file);
+  document.getElementById('cover-preview').innerHTML =
+    `<img src="${url}" style="height:90px;border-radius:4px;border:1px solid #e2e8f0">
+     <span style="font-size:.78rem;color:#475569;margin-left:8px">${file.name}</span>`;
+}
+
+/* ── アップロード（ポーリング版） ── */
+async function startUpload() {
+  if (!token) { showPage('auth-page'); return; }
+  const tId      = document.getElementById('title_id').value;
+  const eId      = document.getElementById('episode_id').value;
+  const scramble = document.querySelector('input[name="scramble"]:checked').value;
+  const tileSize = document.getElementById('tile_size').value;
+  const statusEl = document.getElementById('upload-status');
+  const progArea = document.getElementById('progress-area');
+
+  statusEl.textContent = '';
+  statusEl.className   = '';
+  progArea.style.display = 'block';
+  document.getElementById('upload-btn').disabled = true;
+  updateProgressUI({phase:'queued', current:0, total:selectedFiles.length});
+
+  try {
+    const fd = new FormData();
+    selectedFiles.forEach(f => fd.append('files', f));
+    if (selectedCover) fd.append('cover', selectedCover);
+
+    const uploadUrl = `/api/author/titles/${tId}/episodes/${eId}/upload-and-zip`
+                    + `?do_scramble=${scramble==='1'}&tile_size=${tileSize}`;
+
+    const upRes  = await fetch(uploadUrl, {
+      method: 'POST',
+      headers: {"Authorization": `Bearer ${token}`},
+      body: fd
+    });
+    const upData = await upRes.json();
+    if (!upRes.ok) throw new Error(upData.detail || 'アップロード失敗');
+
+    // ポーリングで進捗監視
+    await pollProgress(upData.job_id);
+
+    // 設定保存
+    const setRes = await fetch(`/api/author/titles/${tId}/episodes/${eId}/settings`, {
+      method: 'PATCH',
+      headers: {'Content-Type':'application/json', 'Authorization':`Bearer ${token}`},
+      body: JSON.stringify({
+        status:          document.getElementById('status_select').value,
+        access_level:    document.getElementById('access_level_select').value,
+        title_name:      document.getElementById('title_name').value,
+        episode_name:    document.getElementById('episode_name').value,
+        caption:         document.getElementById('caption').value,
+        comment:         document.getElementById('comment').value,
+        note:            document.getElementById('note').value,
+        webhook_enabled: document.getElementById('webhook_enabled').checked,
+        scrambled:       scramble === '1',
+        tile_size:       parseInt(tileSize),
+        price: 0,
+        rating:          document.getElementById('rating_select').value,
+        warnings:        [...document.querySelectorAll('.warning-check:checked')].map(el=>el.value),
+        genre_tags:      [...selectedGenreTags],
+        motif_tags:      [...motifTags],
+      })
+    });
+    if (!setRes.ok) throw new Error('設定保存失敗');
+
+    showMsg('upload-status', 'success', '✅ アップロード完了！');
+    selectedFiles = [];
+    selectedCover = null;
+    document.getElementById('file-list').textContent    = '';
+    document.getElementById('cover-preview').innerHTML  = '';
+
+  } catch(e) {
+    showMsg('upload-status', 'error', '❌ ' + e.message);
+  } finally {
+    document.getElementById('upload-btn').disabled = selectedFiles.length === 0;
+  }
+}
+
+/* ── ユーティリティ ── */
+function esc(str) {
+  return String(str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+                        .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+/* ── 進捗ポーリング ── */
+async function pollProgress(jobId) {
+  return new Promise((resolve, reject) => {
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/author/upload-progress/${jobId}`, {
+          headers: {"Authorization": `Bearer ${token}`}
+        });
+        if (!res.ok) { clearInterval(interval); reject(new Error('進捗取得失敗')); return; }
+        const p = await res.json();
+        updateProgressUI(p);
+        if (p.phase === 'done')  { clearInterval(interval); resolve(p); }
+        if (p.phase === 'error') { clearInterval(interval); reject(new Error(p.message)); }
+      } catch(e) { clearInterval(interval); reject(e); }
+    }, 400);
+  });
+}
+
+const PHASE_LABELS = {
+  queued:   '待機中…',
+  resize:   'リサイズ処理中',
+  scramble: 'スクランブル処理中',
+  zip:      'CBZ作成中',
+  done:     '完了',
+  error:    'エラー',
+};
+
+function updateProgressUI(p) {
+  document.getElementById('progress-phase').textContent = PHASE_LABELS[p.phase] || p.phase;
+  const pct = p.total > 0 ? Math.round(p.current / p.total * 100) : 0;
+  document.getElementById('progress-bar').style.width  = pct + '%';
+  document.getElementById('progress-label').textContent =
+    p.total > 0 ? `${p.current} / ${p.total} (${pct}%)` : '';
+}
+
+/* ── ジャンルタグ ── */
+const GENRE_TAGS = [
+  "寓話","不条理","私小説","記録","幻想","叙事","断片",
+  "コメディ","ギャグ","ほのぼの","恐怖","風刺","叙情","シュール",
+  "日常","歴史","SF","ファンタジー","民話的","魔術的リアリズム",
+  "冒険","活劇","ピカレスク",
+  "学園","グルメ","ギャンブル","スポーツ","アイドル",
+  "政治",
+  "家族","友情","恋愛","群像","動物",
+  "少女","少年","青年","劇画",
+  "エッチ"
+];
+const selectedGenreTags = new Set();
+
+function renderGenreTags() {
+  const area = document.getElementById('genre-tag-area');
+  if (!area) return;
+  area.innerHTML = GENRE_TAGS.map(tag => {
+    const active = selectedGenreTags.has(tag);
+    return `<button type="button" onclick="toggleGenreTag('${tag}')"
+      style="padding:4px 10px;border-radius:9999px;font-size:.78rem;cursor:pointer;border:1px solid ${active?'#2563eb':'#cbd5e1'};background:${active?'#2563eb':'#f8fafc'};color:${active?'#fff':'#475569'};transition:all .15s">${tag}</button>`;
+  }).join('');
+}
+
+function toggleGenreTag(tag) {
+  if (selectedGenreTags.has(tag)) selectedGenreTags.delete(tag);
+  else selectedGenreTags.add(tag);
+  renderGenreTags();
+}
+
+/* ── モチーフタグ ── */
+const motifTags = [];
+
+function addMotifTag() {
+  const input = document.getElementById('motif-tag-input');
+  const val = input.value.trim().replace(/[,、]/g, '');
+  if (!val || motifTags.includes(val)) { input.value=''; return; }
+  motifTags.push(val);
+  input.value = '';
+  renderMotifChips();
+}
+
+function removeMotifTag(tag) {
+  const i = motifTags.indexOf(tag);
+  if (i > -1) motifTags.splice(i, 1);
+  renderMotifChips();
+}
+
+function renderMotifChips() {
+  const area = document.getElementById('motif-tag-chips');
+  if (!area) return;
+  area.innerHTML = motifTags.map(tag =>
+    `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;background:#f1f5f9;border:1px solid #cbd5e1;border-radius:9999px;font-size:.78rem;color:#475569">
+      ${tag}
+      <button type="button" onclick="removeMotifTag('${tag}')" style="background:none;border:none;cursor:pointer;color:#94a3b8;font-size:.85rem;line-height:1;padding:0">×</button>
+    </span>`
+  ).join('');
+}
+
+// Enterキーでモチーフタグ追加
+document.addEventListener('DOMContentLoaded', () => {
+  renderGenreTags();
+  const mi = document.getElementById('motif-tag-input');
+  if (mi) mi.addEventListener('keydown', e => { if (e.key==='Enter') { e.preventDefault(); addMotifTag(); }});
+});
+
+/* 起動 */
+initConfig();
+loadPublishedManga();
+</script>
+</body>
+</html>
