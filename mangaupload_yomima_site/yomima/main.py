@@ -15,6 +15,7 @@ import hashlib
 import logging
 import os
 import httpx
+from io import BytesIO
 from contextlib import asynccontextmanager
 from typing import Annotated, Optional
 
@@ -147,8 +148,8 @@ async def create_session(
         raise HTTPException(status_code=400, detail="無効なURL")
 
     client_ip = get_client_ip(request)
-    token     = mg.create_session(url, client_ip)
     cbz_token = None
+    tile_size = 16
 
     # プラットフォームのCBZ URLの場合のみトークンをアップローダーに発行依頼
     if "/api/public/cbz/" in url:
@@ -161,9 +162,13 @@ async def create_session(
                     headers={"x-internal-key": INTERNAL_API_KEY},
                 )
                 if r.status_code == 200:
-                    cbz_token = r.json().get("cbz_token")
+                    data      = r.json()
+                    cbz_token = data.get("cbz_token")
+                    tile_size = data.get("tile_size", 16)
         except Exception as e:
             logger.warning(f"cbz_token取得失敗: {e}")
+
+    token = mg.create_session(url, client_ip, tile_size=tile_size)
 
     return {
         "session_token": token,
@@ -346,11 +351,16 @@ async def images_partial(
         mg.set_session_page_count(session_token, total)
 
     image_items = []
+    client_ip = get_client_ip(request)
+    seed_b    = mg.ip_to_seed_b(client_ip)
+
     for i, path in enumerate(batch, start=offset):
-        filename = os.path.basename(path)
+        filename          = os.path.basename(path)
+        delivery_filename = mg.make_delivery_filename(filename, seed_b) \
+                            if mg.is_scrambled_filename(filename) else filename
         image_items.append({
             "src":      f"/image/{session_token}/{url_hash}/{filename}",
-            "filename": filename,
+            "filename": delivery_filename,
             "index":    i,
             "total":    total,
         })
@@ -393,6 +403,51 @@ async def serve_image(
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="画像が見つかりません")
 
+    client_ip = get_client_ip(request)
+
+    # プラットフォーム画像（スクランブル済み）のみ二重スクランブルを適用
+    if mg.is_scrambled_filename(filename):
+        seed_b           = mg.ip_to_seed_b(client_ip)
+        delivery_filename = mg.make_delivery_filename(filename, seed_b)
+
+        # IPキャッシュキー: {url_hash}_{delivery_filename}
+        cache_key  = f"{url_hash}_{delivery_filename}"
+        cache_dir  = os.path.join(mg.get_cache_dir(), "delivery")
+        os.makedirs(cache_dir, exist_ok=True)
+        cache_path = os.path.join(cache_dir, cache_key)
+
+        if os.path.exists(cache_path):
+            with open(cache_path, "rb") as f:
+                data = f.read()
+        else:
+            # seed_Bでscrambleしてキャッシュに保存
+            loop = asyncio.get_running_loop()
+            tile_size = session.get("tile_size", 16)
+
+            def process():
+                from PIL import Image as PILImage
+                with PILImage.open(path) as img:
+                    img = img.convert("RGB")
+                    scrambled = mg.scramble_image_pil(img, seed_b, tile_size)
+                    buf = BytesIO()
+                    scrambled.save(buf, format="PNG")
+                    return buf.getvalue()
+
+            data = await loop.run_in_executor(_executor, process)
+            with open(cache_path, "wb") as f:
+                f.write(data)
+
+        return Response(
+            content=data,
+            media_type="image/png",
+            headers={
+                "Content-Disposition": f'inline; filename="{delivery_filename}"',
+                "Cache-Control":       "private, max-age=3600",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+
+    # 非スクランブル画像（外部ZIP等）は従来通り
     loop = asyncio.get_running_loop()
     data = await loop.run_in_executor(_executor, mg.load_image_bytes, path)
 

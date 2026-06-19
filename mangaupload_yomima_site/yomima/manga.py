@@ -18,7 +18,9 @@ import time
 import json
 import base64
 import secrets
+import socket
 import urllib.parse
+import numpy as np
 from io import BytesIO
 from typing import Optional
 
@@ -44,7 +46,7 @@ SESSION_TTL_SECONDS = 3600        # セッション有効期限1時間
 # { session_token: { cbz_url, created_at, expires_at, ip, page_count } }
 _session_store: dict[str, dict] = {}
 
-def create_session(cbz_url: str, client_ip: str) -> str:
+def create_session(cbz_url: str, client_ip: str, tile_size: int = 16) -> str:
     """セッショントークンを発行する"""
     token = secrets.token_urlsafe(32)   # 推測不可能な43文字
     now   = time.time()
@@ -54,6 +56,7 @@ def create_session(cbz_url: str, client_ip: str) -> str:
         "expires_at": now + SESSION_TTL_SECONDS,
         "ip":         client_ip,
         "page_count": None,   # 初回アクセス時に確定
+        "tile_size":  tile_size,
     }
     _cleanup_expired_sessions()
     return token
@@ -315,6 +318,103 @@ def extract_archive(archive_path: str, extract_to: str) -> tuple[list[str], list
     result = (natsorted(image_files), warnings)
     _extract_cache[archive_path] = result
     return result
+
+# ---------------------------------------------------------------------------
+# IP由来seed_B生成・画像スクランブル（配信時二重スクランブル用）
+# ---------------------------------------------------------------------------
+
+def ip_to_seed_b(client_ip: str) -> int:
+    """
+    IPv4アドレスをseed_Bに変換（ビット反転、可逆）。
+    seed_B → ip_int → ビット反転 → IPv4 で復元可能。
+    IPv6・unknownの場合は固定値にフォールバック。
+    """
+    try:
+        ip_int = int.from_bytes(socket.inet_aton(client_ip), 'big')
+        return int(f"{ip_int:032b}"[::-1], 2)
+    except Exception:
+        return 0x00000001   # フォールバック
+
+def seed_b_to_ip(seed_b: int) -> str:
+    """seed_B → IPv4アドレスに復元（ビット反転で逆算）"""
+    ip_int = int(f"{seed_b:032b}"[::-1], 2)
+    return socket.inet_ntoa(ip_int.to_bytes(4, 'big'))
+
+def _rand_int(rng, n: int) -> int:
+    """rejection samplingで偏りなし均等整数を返す"""
+    limit = (1 << 32) - ((1 << 32) % n)
+    while True:
+        r = rng.next()
+        if r < limit:
+            return r % n
+
+def _make_perm_viewer(n: int, seed: int) -> np.ndarray:
+    """rejection samplingでnumpyの順列配列を生成（ビューワー用）"""
+    state = seed & 0xFFFFFFFF or 1
+    perm  = np.arange(n, dtype=np.int32)
+    for i in range(n - 1, 0, -1):
+        ni = i + 1
+        limit = (1 << 32) - ((1 << 32) % ni)
+        while True:
+            state ^= (state << 13) & 0xFFFFFFFF
+            state ^= (state >> 17) & 0xFFFFFFFF
+            state ^= (state << 5)  & 0xFFFFFFFF
+            state &= 0xFFFFFFFF
+            if state < limit:
+                j = state % ni
+                break
+        perm[i], perm[j] = perm[j], perm[i]
+    return perm
+
+def scramble_image_pil(img: Image.Image, seed: int, tile_size: int) -> Image.Image:
+    """
+    中央80%エリアのタイルを完全ベクトル化で高速スクランブルする。
+    上下左右10%は不動エリアとして保持。
+    配信時の二重スクランブル（seed_B）に使用。
+    """
+    arr = np.array(img)
+    h, w = arr.shape[:2]
+    cols = w // tile_size
+    rows = h // tile_size
+
+    x0 = int(cols * 0.1)
+    x1 = int(cols * 0.9)
+    y0 = int(rows * 0.1)
+    y1 = int(rows * 0.9)
+
+    cx = x1 - x0
+    cy = y1 - y0
+    n  = cy * cx
+
+    center = arr[y0*tile_size:y1*tile_size, x0*tile_size:x1*tile_size]
+    tiled  = (center
+              .reshape(cy, tile_size, cx, tile_size, -1)
+              .transpose(0, 2, 1, 3, 4)
+              .reshape(n, tile_size, tile_size, -1))
+
+    perm     = _make_perm_viewer(n, seed)
+    shuffled = tiled[perm]
+
+    result = arr.copy()
+    result[y0*tile_size:y1*tile_size, x0*tile_size:x1*tile_size] = (
+        shuffled
+        .reshape(cy, cx, tile_size, tile_size, -1)
+        .transpose(0, 2, 1, 3, 4)
+        .reshape(cy * tile_size, cx * tile_size, -1)
+    )
+    return Image.fromarray(result)
+
+def make_delivery_filename(original_filename: str, seed_b: int) -> str:
+    """
+    配信ファイル名を生成する。
+    CBZ内ファイル名: {4文字index}{8文字seed_A}{8文字乱数}.png
+    配信ファイル名:  {4文字index}{8文字seed_B}{8文字seed_A}.png
+    """
+    stem      = os.path.splitext(os.path.basename(original_filename))[0]
+    index     = stem[:4]    # ページindex（Base62 4文字）
+    seed_a    = stem[4:12]  # seed_A（8文字hex）
+    seed_b_hex = f"{seed_b:08x}"
+    return f"{index}{seed_b_hex}{seed_a}.png"
 
 # ---------------------------------------------------------------------------
 # Image loading

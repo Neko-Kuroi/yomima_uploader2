@@ -124,12 +124,20 @@ class Xorshift32 {
   }
 }
 
+function randInt(rng, n) {
+  /* rejection samplingで偏りなし均等整数 */
+  const limit = 4294967296 - (4294967296 % n);  // 2^32 - (2^32 % n)
+  let r;
+  do { r = rng.next(); } while (r >= limit);
+  return r % n;
+}
+
 function xorshiftShuffle(n, seed) {
-  /* 0..n-1 の配列を返す */
+  /* 0..n-1 の配列を返す（rejection sampling） */
   const arr = Array.from({length: n}, (_, i) => i);
   const rng = new Xorshift32(seed);
   for (let i = n - 1; i > 0; i--) {
-    const j = rng.next() % (i + 1);
+    const j = randInt(rng, i + 1);
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
   return arr;
@@ -145,33 +153,90 @@ function isScrambled(filename) {
 }
 
 /**
- * スクランブル済み画像を Canvas に復号して返す
+ * 中央80%エリアのタイルリストを生成
+ */
+function centerTiles(cols, rows) {
+  const x0 = Math.floor(cols * 0.1);
+  const x1 = Math.floor(cols * 0.9);
+  const y0 = Math.floor(rows * 0.1);
+  const y1 = Math.floor(rows * 0.9);
+  const tiles = [];
+  for (let y = y0; y < y1; y++)
+    for (let x = x0; x < x1; x++)
+      tiles.push([y, x]);
+  return tiles;
+}
+
+/**
+ * スクランブル済み画像を Canvas に復号して返す（2段階・中央80%のみ）
+ * 配信ファイル名: {4文字index}{8文字seed_B}{8文字seed_A}.png
  */
 function decode(img, filename, tileSize) {
   const W = img.naturalWidth, H = img.naturalHeight;
   const cols = Math.floor(W / tileSize);
   const rows = Math.floor(H / tileSize);
-  const n    = cols * rows;
 
-  const seed     = parseInt(filename.replace(/\.[^.]+$/, '').slice(4, 12), 16);
-  const shuffled = xorshiftShuffle(n, seed);
+  const stem   = filename.replace(/\.[^.]+$/, '');
+  const seed_B = parseInt(stem.slice(4, 12), 16);
+  const seed_A = parseInt(stem.slice(12, 20), 16);
 
   const cv  = document.createElement('canvas');
   cv.width  = W;
   cv.height = H;
   const ctx = cv.getContext('2d');
-  ctx.drawImage(img, 0, 0);           // まず全体コピー（端数処理）
+  ctx.drawImage(img, 0, 0);  // 全体コピー（不動エリア含む）
 
-  /* 逆写像: Python側で tile[i] → pos[shuffled[i]] に置いた
-     JS側:   pos[shuffled[i]] から tile を取り出して pos[i] に戻す */
+  const tiles = centerTiles(cols, rows);
+  const n     = tiles.length;
+
+  // 第一層: seed_Bで復号（逆写像）
+  const shuffled_B = (() => {
+    const arr = tiles.slice();
+    const rng = new Xorshift32(seed_B);
+    for (let i = n - 1; i > 0; i--) {
+      const j = randInt(rng, i + 1);
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  })();
+
+  const tmp1 = document.createElement('canvas');
+  tmp1.width = W; tmp1.height = H;
+  const ctx1 = tmp1.getContext('2d');
+  ctx1.drawImage(img, 0, 0);
   for (let i = 0; i < n; i++) {
-    const si = shuffled[i];
-    ctx.drawImage(img,
-      (si % cols) * tileSize, Math.floor(si / cols) * tileSize, tileSize, tileSize,
-      ( i % cols) * tileSize, Math.floor( i / cols) * tileSize, tileSize, tileSize
+    const [sy, sx] = shuffled_B[i];
+    const [dy, dx] = tiles[i];
+    ctx1.drawImage(img,
+      sx * tileSize, sy * tileSize, tileSize, tileSize,
+      dx * tileSize, dy * tileSize, tileSize, tileSize
     );
   }
-  return cv;
+
+  // 第二層: seed_Aで復号（逆写像）
+  const shuffled_A = (() => {
+    const arr = tiles.slice();
+    const rng = new Xorshift32(seed_A);
+    for (let i = n - 1; i > 0; i--) {
+      const j = randInt(rng, i + 1);
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  })();
+
+  const cv2  = document.createElement('canvas');
+  cv2.width  = W; cv2.height = H;
+  const ctx2 = cv2.getContext('2d');
+  ctx2.drawImage(tmp1, 0, 0);
+  for (let i = 0; i < n; i++) {
+    const [sy, sx] = shuffled_A[i];
+    const [dy, dx] = tiles[i];
+    ctx2.drawImage(tmp1,
+      sx * tileSize, sy * tileSize, tileSize, tileSize,
+      dx * tileSize, dy * tileSize, tileSize, tileSize
+    );
+  }
+  return cv2;
 }
 
 /* ================================================================

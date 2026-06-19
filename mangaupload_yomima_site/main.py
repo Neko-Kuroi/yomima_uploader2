@@ -11,6 +11,7 @@ import asyncio
 import base64
 import hashlib
 import hmac as hmac_lib
+import numpy as np
 from io import BytesIO
 from pathlib import Path
 from datetime import datetime, timedelta, UTC
@@ -421,30 +422,66 @@ def xorshift_shuffle(items: list, seed: int) -> list:
     rng = Xorshift32(seed)
     res = items[:]
     for i in range(len(res) - 1, 0, -1):
-        j = rng.next() % (i + 1)
+        j = _rand_int(rng, i + 1)
         res[i], res[j] = res[j], res[i]
     return res
 
+def _rand_int(rng: Xorshift32, n: int) -> int:
+    """rejection samplingで偏りなし均等整数を返す"""
+    limit = (1 << 32) - ((1 << 32) % n)
+    while True:
+        r = rng.next()
+        if r < limit:
+            return r % n
+
+def _make_perm(n: int, seed: int) -> np.ndarray:
+    """rejection samplingでnumpyの順列配列を生成"""
+    rng  = Xorshift32(seed)
+    perm = np.arange(n, dtype=np.int32)
+    for i in range(n - 1, 0, -1):
+        j = _rand_int(rng, i + 1)
+        perm[i], perm[j] = perm[j], perm[i]
+    return perm
+
 def scramble_image(img: Image.Image, seed: int, tile_size: int) -> Image.Image:
-    width, height  = img.size
-    cols           = width  // tile_size
-    rows           = height // tile_size
-    num_tiles      = cols * rows
-    shuffled       = xorshift_shuffle(list(range(num_tiles)), seed)
-    scrambled_img  = img.copy()
-    for i in range(num_tiles):
-        dest_idx = shuffled[i]
-        sx, sy   = (i        % cols) * tile_size, (i        // cols) * tile_size
-        dx, dy   = (dest_idx % cols) * tile_size, (dest_idx // cols) * tile_size
-        tile     = img.crop((sx, sy, sx + tile_size, sy + tile_size))
-        scrambled_img.paste(tile, (dx, dy))
-    if width % tile_size > 0:
-        ex = cols * tile_size
-        scrambled_img.paste(img.crop((ex, 0, width, height)), (ex, 0))
-    if height % tile_size > 0:
-        ey = rows * tile_size
-        scrambled_img.paste(img.crop((0, ey, width, height)), (0, ey))
-    return scrambled_img
+    """
+    中央80%エリアのタイルを完全ベクトル化で高速スクランブルする。
+    上下左右10%は不動エリアとして保持。
+    """
+    arr = np.array(img)
+    h, w = arr.shape[:2]
+    cols = w // tile_size
+    rows = h // tile_size
+
+    x0 = int(cols * 0.1)
+    x1 = int(cols * 0.9)
+    y0 = int(rows * 0.1)
+    y1 = int(rows * 0.9)
+
+    cx = x1 - x0
+    cy = y1 - y0
+    n  = cy * cx
+
+    # 中央エリアをタイル単位の4D配列に変形
+    center = arr[y0*tile_size:y1*tile_size, x0*tile_size:x1*tile_size]
+    tiled  = (center
+              .reshape(cy, tile_size, cx, tile_size, -1)
+              .transpose(0, 2, 1, 3, 4)
+              .reshape(n, tile_size, tile_size, -1))
+
+    # シャッフル: NumPyインデックス1回で完了
+    perm     = _make_perm(n, seed)
+    shuffled = tiled[perm]
+
+    # 元の形に戻して結果配列に書き込む
+    result = arr.copy()
+    result[y0*tile_size:y1*tile_size, x0*tile_size:x1*tile_size] = (
+        shuffled
+        .reshape(cy, cx, tile_size, tile_size, -1)
+        .transpose(0, 2, 1, 3, 4)
+        .reshape(cy * tile_size, cx * tile_size, -1)
+    )
+    return Image.fromarray(result)
 
 def generate_thumbnail(img_path: Path, thumb_dir: Path, index: int) -> Path:
     thumb_path = thumb_dir / f"thumb_{index:04d}.jpg"
@@ -934,10 +971,19 @@ async def issue_cbz_token(
 ):
     if not INTERNAL_API_KEY or x_internal_key != INTERNAL_API_KEY:
         raise HTTPException(status_code=403, detail="内部アクセスのみ許可")
-    ep = db.query(Episode).filter_by(public_id=public_id).first()
-    if not ep:
-        raise HTTPException(status_code=404, detail="エピソードが見つかりません")
-    return {"cbz_token": _make_cbz_token(public_id, client_ip)}
+    ep, user_dir, settings_path = resolve_episode_by_public_id(public_id, db)
+    tile_size = TILE_SIZE_DEFAULT
+    if settings_path.exists():
+        try:
+            with open(settings_path) as f:
+                meta = json.load(f)
+            tile_size = meta.get("tile_size", TILE_SIZE_DEFAULT)
+        except Exception:
+            pass
+    return {
+        "cbz_token": _make_cbz_token(public_id, client_ip),
+        "tile_size": tile_size,
+    }
 
 # ---------------------------------------------------------------------------
 # 公開：CBZ配信
