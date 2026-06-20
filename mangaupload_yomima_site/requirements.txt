@@ -12,3 +12,5 @@ email_validator
 python-jose
 sqlalchemy
 slowapi
+numpy>=1.24.0
+segno>=1.6.0
