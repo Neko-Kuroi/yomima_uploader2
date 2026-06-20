@@ -26,6 +26,11 @@ from typing import Optional
 
 from PIL import Image
 from natsort import natsorted
+#from watermark import embed_watermarks, ip_to_seed_b
+# scramble(seed_B) 適用後に呼ぶ
+#seed_b = ip_to_seed_b(client_ip)
+#img = embed_watermarks(img, seed_b, client_ip)
+
 
 # ---------------------------------------------------------------------------
 # Constants
