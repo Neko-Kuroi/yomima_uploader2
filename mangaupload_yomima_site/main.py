@@ -348,13 +348,17 @@ def sync_episode_tags(
         if s.title_name:
             work.title = s.title_name
 
-    public_id = f"{work.user_id}/{title_id}/{episode_id}"
     ep = db.query(Episode).filter_by(id=episode_id, work_id=title_id).first()
     if not ep:
-        ep = Episode(id=episode_id, work_id=title_id, public_id=public_id, title=s.episode_name or f"ep_{episode_id}")
+        ep = Episode(
+            id        = episode_id,
+            work_id   = title_id,
+            public_id = uuid.uuid4().hex,
+            title     = s.episode_name or f"ep_{episode_id}",
+        )
         db.add(ep)
         db.flush()
-    ep.public_id = public_id
+    # public_id は新規作成時のみ生成、以降は上書きしない
     ep.title     = s.episode_name or ep.title
     ep.rating    = s.rating
     ep.status    = s.status
@@ -610,7 +614,10 @@ async def login(
 # ---------------------------------------------------------------------------
 
 @app.get("/api/author/works")
-async def get_my_works(current_user: User = Depends(get_current_user)):
+async def get_my_works(
+    current_user: User    = Depends(get_current_user),
+    db:           Session = Depends(get_db),
+):
     works    = []
     user_dir = FINAL_ZIP_DIR / f"user_{current_user.id}"
     if not user_dir.exists():
@@ -623,6 +630,10 @@ async def get_my_works(current_user: User = Depends(get_current_user)):
             cover_path = settings_path.parent / f"episode_{meta['episode_id']}_cover.jpg"
             meta["has_cbz"]   = cbz_path.exists()
             meta["has_cover"] = cover_path.exists()
+            ep = db.query(Episode).filter_by(
+                id=meta["episode_id"], work_id=meta["title_id"]
+            ).first()
+            meta["public_id"] = ep.public_id if ep else None
             works.append(meta)
         except Exception:
             continue
@@ -831,14 +842,17 @@ async def update_settings(
     if "created_at" not in existing:
         existing["created_at"] = time.time()
 
-    with open(settings_path, "w") as f:
-        json.dump(existing, f, indent=4, ensure_ascii=False)
-
     db = SessionLocal()
     try:
         sync_episode_tags(db, current_user, title_id, episode_id, settings)
+        ep = db.query(Episode).filter_by(id=episode_id, work_id=title_id).first()
+        if ep:
+            existing["public_id"] = ep.public_id
     finally:
         db.close()
+
+    with open(settings_path, "w") as f:
+        json.dump(existing, f, indent=4, ensure_ascii=False)
 
     return {"status": "success"}
 
