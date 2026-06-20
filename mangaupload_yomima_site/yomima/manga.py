@@ -506,7 +506,6 @@ def get_image_path(url_hash: str, filename: str) -> Optional[str]:
 
 
 def apply_watermark(img: Image.Image, seed_b: int, client_ip: str) -> Image.Image:
-    from watermark import embed_watermarks
     watermarked = embed_watermarks(img, seed_b, client_ip)
     return watermarked.convert("RGB")
 # ---------------------------------------------------------------------------
