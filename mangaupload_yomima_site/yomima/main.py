@@ -429,8 +429,10 @@ async def serve_image(
                 with PILImage.open(path) as img:
                     img = img.convert("RGB")
                     scrambled = mg.scramble_image_pil(img, seed_b, tile_size)
+                    watermarked = mg.apply_watermark(scrambled, seed_b, client_ip)
                     buf = BytesIO()
-                    scrambled.save(buf, format="PNG")
+                    #scrambled.save(buf, format="PNG")
+                    watermarked.save(buf, format="PNG")
                     return buf.getvalue()
 
             data = await loop.run_in_executor(_executor, process)

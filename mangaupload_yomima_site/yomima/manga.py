@@ -26,7 +26,8 @@ from typing import Optional
 
 from PIL import Image
 from natsort import natsorted
-#from watermark import embed_watermarks, ip_to_seed_b
+
+from watermark import embed_watermarks, ip_to_seed_b
 # scramble(seed_B) 適用後に呼ぶ
 #seed_b = ip_to_seed_b(client_ip)
 #img = embed_watermarks(img, seed_b, client_ip)
@@ -503,6 +504,11 @@ def get_image_path(url_hash: str, filename: str) -> Optional[str]:
     path = os.path.join(get_cache_dir(), f"{url_hash}_extracted", filename)
     return path if os.path.exists(path) else None
 
+
+def apply_watermark(img: Image.Image, seed_b: int, client_ip: str) -> Image.Image:
+    from watermark import embed_watermarks
+    watermarked = embed_watermarks(img, seed_b, client_ip)
+    return watermarked.convert("RGB")
 # ---------------------------------------------------------------------------
 # Manga list serialization
 # ---------------------------------------------------------------------------
