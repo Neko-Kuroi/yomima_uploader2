@@ -72,7 +72,18 @@ CHARSET_62                   = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijkl
 INTERNAL_API_KEY = os.environ.get("INTERNAL_API_KEY", "")
 CBZ_TOKEN_SECRET = secrets.token_hex(32)   # 起動時ランダム生成・外部に出ない
 CBZ_TOKEN_TTL    = 300                      # 5分
-VIEWER_BASE_URL  = os.environ.get("VIEWER_BASE_URL", "http://localhost:8001")
+_VIEWER_BASE_URL_ENV = os.environ.get("VIEWER_BASE_URL", "")
+
+def get_viewer_base_url() -> str:
+    """viewer_url.txt があればそちらを優先、なければ環境変数、最後にlocalhost"""
+    url_file = Path("./viewer_url.txt")
+    if url_file.exists():
+        val = url_file.read_text().strip()
+        if val.startswith("http"):
+            return val
+    if _VIEWER_BASE_URL_ENV:
+        return _VIEWER_BASE_URL_ENV
+    return "http://localhost:8001"
 
 # nonce使い捨て管理 { nonce: 登録時刻 }
 _used_cbz_nonces: dict[str, float] = {}
@@ -1015,7 +1026,7 @@ async def serve_public_cbz(
     client_ip = get_client_ip(request)
 
     # Referer検証（ビューワーからのアクセスのみ許可）
-    if not referer or not referer.startswith(VIEWER_BASE_URL):
+    if not referer or not referer.startswith(get_viewer_base_url()):
         raise HTTPException(status_code=403, detail="不正なアクセス元です")
 
     # CBZトークン多重検証（HMAC・exp・public_id・IP・nonce使い捨て）

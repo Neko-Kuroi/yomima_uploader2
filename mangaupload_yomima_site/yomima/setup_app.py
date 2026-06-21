@@ -123,8 +123,14 @@ def setup_bore_tunnel():
 
     if url_found:
         print(f"✅ トンネルが開始されました: {url}")
-        # IPython.display.HTML を使用して、クリック可能なURLを生成し表示します。
         display(HTML(f'<a href="http://{url}" target="_blank" style="font-size:18px; color:pink;">{url}</a>'))
+        # プラットフォーム側に viewer_url.txt を書き込む（Referer検証用）
+        viewer_url_for_platform = os.path.join(
+            os.path.dirname(current_directory), "viewer_url.txt"
+        )
+        with open(viewer_url_for_platform, "w") as f:
+            f.write(f"http://{url}")
+        print(f"📝 viewer_url.txt をプラットフォーム側に保存しました: {viewer_url_for_platform}")
         # boreトンネルへのcurlテスト
         print("\n--- Boreトンネルへの内部curlテスト ---")
         try:
@@ -236,6 +242,13 @@ def setup_cloudflare_tunnel():
         with open(f"{current_directory}/platform_url.txt", "w") as f:
             f.write(url)
         print("📝 platform_url.txt に保存しました")
+        # プラットフォーム側に viewer_url.txt を書き込む（Referer検証用）
+        viewer_url_for_platform = os.path.join(
+            os.path.dirname(current_directory), "viewer_url.txt"
+        )
+        with open(viewer_url_for_platform, "w") as f:
+            f.write(url)
+        print(f"📝 viewer_url.txt をプラットフォーム側に保存しました: {viewer_url_for_platform}")
     else:
         print("⚠️ URL取得失敗。以下の出力を見てください：")
         remaining = tunnel_process.stdout.read()
