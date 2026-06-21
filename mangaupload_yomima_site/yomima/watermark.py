@@ -162,26 +162,33 @@ def embed_watermarks(
     placed: list[_PlacedRect] = []
 
     # ── RFVP-64 アバターを上下バンドのいずれかに配置 ─────────────────
-    rfvp_img = _rfvp64.encode(client_ip)
-    rw, rh   = rfvp_img.size
-    for band in [top_band, bottom_band]:
-        rect = _place_in_band(rng, rw, rh, *band, placed)
-        if rect is not None:
-            placed.append(rect)
-            result.alpha_composite(rfvp_img, dest=(rect.x, rect.y))
-            break
+    try:
+        rfvp_img = _rfvp64.encode(client_ip)
+        rw, rh   = rfvp_img.size
+        for band in [top_band, bottom_band]:
+            rect = _place_in_band(rng, rw, rh, *band, placed)
+            if rect is not None:
+                placed.append(rect)
+                result.alpha_composite(rfvp_img, dest=(rect.x, rect.y))
+                break
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("RFVP-64をスキップ: %s", e)
 
     # ── QR を qr_count 個配置（上下バンドに交互に） ──────────────────
-    qr_mark = make_qr_mark(seed_b, scale=qr_scale, opacity=qr_opacity)
-    qw, qh  = qr_mark.size
-
-    for i in range(qr_count):
-        band = top_band if i % 2 == 0 else bottom_band
-        rect = _place_in_band(rng, qw, qh, *band, placed)
-        if rect is None:
-            continue
-        placed.append(rect)
-        result.alpha_composite(qr_mark, dest=(rect.x, rect.y))
+    try:
+        qr_mark = make_qr_mark(seed_b, scale=qr_scale, opacity=qr_opacity)
+        qw, qh  = qr_mark.size
+        for i in range(qr_count):
+            band = top_band if i % 2 == 0 else bottom_band
+            rect = _place_in_band(rng, qw, qh, *band, placed)
+            if rect is None:
+                continue
+            placed.append(rect)
+            result.alpha_composite(qr_mark, dest=(rect.x, rect.y))
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("QRをスキップ: %s", e)
 
     # ── ヒエログリフ配置（フォントなし環境はスキップ） ───────────────
     try:
