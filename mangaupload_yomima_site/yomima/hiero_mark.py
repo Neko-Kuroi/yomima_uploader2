@@ -18,10 +18,10 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 # ── フォントパス ──────────────────────────────────────────────────────
-HIERO_FONT_PATH = Path(
-    HIERO_FONT_PATH = Path(__file__).parent / "fonts" / "NotoSansEgyptianHieroglyphs-Regular.ttf"
-    #"/usr/share/fonts/truetype/noto/NotoSansEgyptianHieroglyphs-Regular.ttf"
-)
+#HIERO_FONT_PATH = Path(
+#    #"/usr/share/fonts/truetype/noto/NotoSansEgyptianHieroglyphs-Regular.ttf"
+#)
+HIERO_FONT_PATH = Path(__file__).parent / "fonts" / "NotoSansEgyptianHieroglyphs-Regular.ttf"
 
 # ── ヒエログリフ変換テーブル（5bit × 32文字）────────────────────────
 HIERO_WORDS = [
