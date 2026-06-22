@@ -99,12 +99,11 @@ def _consume_nonce(nonce: str) -> bool:
     _used_cbz_nonces[nonce] = now
     return True
 
-def _make_cbz_token(public_id: str, client_ip: str) -> str:
+def _make_cbz_token(public_id: str) -> str:
     """CBZ専用署名トークンを生成する"""
     payload = {
         "pid":   public_id,
         "exp":   int(time.time()) + CBZ_TOKEN_TTL,
-        "ip":    client_ip,
         "nonce": secrets.token_hex(8),
     }
     payload_b64 = base64.urlsafe_b64encode(
@@ -117,8 +116,8 @@ def _make_cbz_token(public_id: str, client_ip: str) -> str:
     ).hexdigest()[:24]
     return f"{payload_b64}.{sig}"
 
-def _verify_cbz_token(token: str, public_id: str, client_ip: str) -> bool:
-    """CBZトークンを多重検証する（HMAC・exp・public_id・IP・nonce使い捨て）"""
+def _verify_cbz_token(token: str, public_id: str) -> bool:
+    """CBZトークンを多重検証する（HMAC・exp・public_id・nonce使い捨て）"""
     try:
         payload_b64, sig = token.rsplit(".", 1)
     except ValueError:
@@ -140,8 +139,6 @@ def _verify_cbz_token(token: str, public_id: str, client_ip: str) -> bool:
     if time.time() > payload["exp"]:
         return False
     if payload.get("pid") != public_id:
-        return False
-    if payload.get("ip") != client_ip:
         return False
     if not _consume_nonce(payload.get("nonce", "")):
         return False
@@ -990,7 +987,6 @@ async def author_thumb(
 async def issue_cbz_token(
     request:        Request,
     public_id:      str = Query(...),
-    client_ip:      str = Query(...),
     x_internal_key: Optional[str] = Header(default=None),
     db:             Session = Depends(get_db),
 ):
@@ -1006,7 +1002,7 @@ async def issue_cbz_token(
         except Exception:
             pass
     return {
-        "cbz_token": _make_cbz_token(public_id, client_ip),
+        "cbz_token": _make_cbz_token(public_id),
         "tile_size": tile_size,
     }
 
@@ -1025,12 +1021,19 @@ async def serve_public_cbz(
 ):
     client_ip = get_client_ip(request)
 
+    # [DEBUG] Referer検証ログ
+    logger.info(f"[DEBUG CBZ] referer={referer!r}")
+    logger.info(f"[DEBUG CBZ] viewer_base={get_viewer_base_url()!r}")
+    logger.info(f"[DEBUG CBZ] client_ip={client_ip!r}")
+
     # Referer検証（ビューワーからのアクセスのみ許可）
     if not referer or not referer.startswith(get_viewer_base_url()):
+        logger.info("[DEBUG CBZ] NG: Referer不一致")
         raise HTTPException(status_code=403, detail="不正なアクセス元です")
 
-    # CBZトークン多重検証（HMAC・exp・public_id・IP・nonce使い捨て）
-    if not cbz_token or not _verify_cbz_token(cbz_token, public_id, client_ip):
+    # CBZトークン多重検証（HMAC・exp・public_id・nonce使い捨て）
+    if not cbz_token or not _verify_cbz_token(cbz_token, public_id):
+        logger.info(f"[DEBUG CBZ] NG: トークン検証失敗 cbz_token={cbz_token!r}")
         raise HTTPException(status_code=403, detail="CBZトークンが無効または期限切れです")
 
     ep, user_dir, settings_path = resolve_episode_by_public_id(public_id, db)

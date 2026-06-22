@@ -20,19 +20,26 @@ logger = logging.getLogger(__name__)
 current_directory = os.getcwd()
 
 # ログ読み取り関数は削除またはコメントアウト
+_viewer_log_file = None
+
 def read_process_output(process, stream, prefix=""):
-    """プロセスの出力をリアルタイムで読み取り、表示する関数"""
+    """プロセスの出力をリアルタイムで読み取り、ファイルに書き出す"""
+    global _viewer_log_file
+    if _viewer_log_file is None:
+        _viewer_log_file = open("/content/viewer_debug.log", "w", buffering=1)
     while True:
         line = stream.readline()
         if line:
-            print(f"{prefix}{line.strip()}")
+            _viewer_log_file.write(f"{prefix}{line.strip()}\n")
+            _viewer_log_file.flush()
         elif process.poll() is not None:
             try:
                 remaining = stream.read()
                 if remaining:
-                     print(f"{prefix}{remaining.strip()}")
+                    _viewer_log_file.write(f"{prefix}{remaining.strip()}\n")
+                    _viewer_log_file.flush()
             except ValueError:
-                 pass
+                pass
             break
         else:
             time.sleep(0.01)
@@ -56,12 +63,11 @@ def setup_bore_tunnel():
 
     # FastAPIアプリケーションをバックグラウンドで起動します。
     print("🚀 FastAPI アプリケーションを起動しています...")
+    viewer_log = open("/content/viewer_debug.log", "w", buffering=1)
     flask_process = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "main:app", "--reload"],
-        # stdout=subprocess.PIPE, # ログ出力しないため削除
-        # stderr=subprocess.PIPE, # ログ出力しないため削除
-        # text=True,
-        # bufsize=1
+        stdout=viewer_log,
+        stderr=viewer_log,
     )
 
     # Flaskプロセスの出力を読み取るスレッドは削除

@@ -15,6 +15,7 @@ import hashlib
 import logging
 import os
 import httpx
+from pathlib import Path
 from io import BytesIO
 from contextlib import asynccontextmanager
 from typing import Annotated, Optional
@@ -43,7 +44,18 @@ TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
 
 PLATFORM_BASE_URL = os.environ.get("PLATFORM_BASE_URL", "http://localhost:8000")
 INTERNAL_API_KEY  = os.environ.get("INTERNAL_API_KEY", "")
-VIEWER_BASE_URL   = os.environ.get("VIEWER_BASE_URL",   "http://localhost:8001")
+_VIEWER_BASE_URL_ENV = os.environ.get("VIEWER_BASE_URL", "")
+
+def get_viewer_base_url() -> str:
+    """自分自身のURLをplatform_url.txt（ビューワー側）から動的に読む"""
+    url_file = Path(__file__).parent / "platform_url.txt"
+    if url_file.exists():
+        val = url_file.read_text().strip()
+        if val.startswith("http"):
+            return val
+    if _VIEWER_BASE_URL_ENV:
+        return _VIEWER_BASE_URL_ENV
+    return "http://localhost:8001"
 
 _executor       = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 _thumb_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
@@ -158,7 +170,7 @@ async def create_session(
             async with httpx.AsyncClient(timeout=3.0) as client:
                 r = await client.get(
                     f"{PLATFORM_BASE_URL}/api/internal/issue-cbz-token",
-                    params={"public_id": public_id, "client_ip": client_ip},
+                    params={"public_id": public_id},
                     headers={"x-internal-key": INTERNAL_API_KEY},
                 )
                 if r.status_code == 200:
@@ -497,7 +509,7 @@ async def download_start(
             extra_headers = {}
             if cbz_token and "/api/public/cbz/" in url:
                 download_url  = f"{url}?cbz_token={cbz_token}"
-                extra_headers = {"Referer": VIEWER_BASE_URL}
+                extra_headers = {"Referer": get_viewer_base_url()}
             success, err = mg.download_file(
                 download_url, archive_path,
                 extra_headers=extra_headers,
