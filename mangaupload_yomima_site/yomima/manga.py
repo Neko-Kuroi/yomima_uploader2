@@ -64,6 +64,7 @@ def create_session(cbz_url: str, client_ip: str, tile_size: int = 16) -> str:
         "page_count": None,   # 初回アクセス時に確定
         "tile_size":  tile_size,
         "read_at":    now,    # 読み開始時刻（ヒエログリフ埋め込み用・全ページ共通）
+        "seed_b":     ip_to_seed_b(client_ip),  # 一度だけ計算
     }
     _cleanup_expired_sessions()
     return token

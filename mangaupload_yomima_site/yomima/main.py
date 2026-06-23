@@ -419,7 +419,7 @@ async def serve_image(
 
     # プラットフォーム画像（スクランブル済み）のみ二重スクランブルを適用
     if mg.is_scrambled_filename(filename):
-        seed_b            = mg.ip_to_seed_b(client_ip)
+        seed_b            = session["seed_b"]
         delivery_filename = mg.make_delivery_filename(filename, seed_b)
 
         # IPキャッシュキー: {url_hash}_{delivery_filename}
