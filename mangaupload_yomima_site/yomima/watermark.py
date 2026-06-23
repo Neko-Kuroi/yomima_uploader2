@@ -21,7 +21,8 @@ from typing import NamedTuple
 from PIL import Image
 
 from qr_mark import make_qr_mark
-from hiero_mark import make_hiero_mark, HIERO_FONT_PATH
+from datetime import datetime, timezone
+from hiero_mark import make_hiero_date_mark, HIERO_FONT_PATH
 from rfvp64 import RFVP64Codec
 
 _rfvp64 = RFVP64Codec()  # モジュールレベルで1度だけ初期化
@@ -161,23 +162,31 @@ def embed_watermarks(
     rng    = Xorshift32(seed_b ^ 0xC0FFEE42)
     placed: list[_PlacedRect] = []
 
-    # ── RFVP-64 アバターを上下バンドのいずれかに配置 ─────────────────
+    # IPv4かどうか（RFVP-64はIPv4のみ対応）
     try:
-        rfvp_img = _rfvp64.encode(client_ip)
-        rw, rh   = rfvp_img.size
-        for band in [top_band, bottom_band]:
-            rect = _place_in_band(rng, rw, rh, *band, placed)
-            if rect is not None:
-                placed.append(rect)
-                result.alpha_composite(rfvp_img, dest=(rect.x, rect.y))
-                break
-    except Exception as e:
-        import logging
-        logging.getLogger(__name__).warning("RFVP-64をスキップ: %s", e)
+        socket.inet_aton(client_ip)
+        is_ipv4 = True
+    except OSError:
+        is_ipv4 = False
 
-    # ── QR を qr_count 個配置（上下バンドに交互に） ──────────────────
+    # ── RFVP-64 アバターを上下バンドのいずれかに配置（IPv4のみ） ──────
+    if is_ipv4:
+        try:
+            rfvp_img = _rfvp64.encode(client_ip)
+            rw, rh   = rfvp_img.size
+            for band in [top_band, bottom_band]:
+                rect = _place_in_band(rng, rw, rh, *band, placed)
+                if rect is not None:
+                    placed.append(rect)
+                    result.alpha_composite(rfvp_img, dest=(rect.x, rect.y))
+                    break
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("RFVP-64をスキップ: %s", e)
+
+    # ── QR を qr_count 個配置（IPv4: seed_b hex8文字 / IPv6: hex32文字） ──
     try:
-        qr_mark = make_qr_mark(seed_b, scale=qr_scale, opacity=qr_opacity)
+        qr_mark = make_qr_mark(seed_b, scale=qr_scale, opacity=qr_opacity, client_ip=client_ip)
         qw, qh  = qr_mark.size
         for i in range(qr_count):
             band = top_band if i % 2 == 0 else bottom_band
@@ -190,10 +199,10 @@ def embed_watermarks(
         import logging
         logging.getLogger(__name__).warning("QRをスキップ: %s", e)
 
-    # ── ヒエログリフ配置（フォントなし環境はスキップ） ───────────────
+    # ── ヒエログリフ配置（日時情報・IPv4/IPv6共通・フォントなし環境はスキップ） ──
     try:
-        hiero_mark = make_hiero_mark(
-            client_ip,
+        hiero_mark = make_hiero_date_mark(
+            datetime.now(tz=timezone.utc),
             font_size=text_font_size,
             opacity=text_opacity,
             color=text_color,
@@ -208,7 +217,7 @@ def embed_watermarks(
                 break
     except OSError as e:
         import logging
-        logging.getLogger(__name__).warning("ヒエログリフをスキップ: %s", e)
+        logging.getLogger(__name__).info("ヒエログリフをスキップ: %s", e)
 
     return result
 

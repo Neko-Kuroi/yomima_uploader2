@@ -331,15 +331,17 @@ def extract_archive(archive_path: str, extract_to: str) -> tuple[list[str], list
 
 def ip_to_seed_b(client_ip: str) -> int:
     """
-    IPv4アドレスをseed_Bに変換（ビット反転、可逆）。
-    seed_B → ip_int → ビット反転 → IPv4 で復元可能。
-    IPv6・unknownの場合は固定値にフォールバック。
+    IPアドレスをseed_Bに変換。
+    IPv4: ビット反転（可逆）。seed_B → ip_int → ビット反転 → IPv4 で復元可能。
+    IPv6: MD5の先頭4バイトを使用（不可逆。スクランブル用途のみ）。
     """
     try:
         ip_int = int.from_bytes(socket.inet_aton(client_ip), 'big')
         return int(f"{ip_int:032b}"[::-1], 2)
     except Exception:
-        return 0x00000001   # フォールバック
+        import hashlib
+        h = hashlib.md5(client_ip.encode()).digest()[:4]
+        return int.from_bytes(h, 'big')
 
 def seed_b_to_ip(seed_b: int) -> str:
     """seed_B → IPv4アドレスに復元（ビット反転で逆算）"""
