@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import socket
 import struct
+import time
+from collections import OrderedDict
 from pathlib import Path
 from typing import NamedTuple
 
@@ -26,6 +28,27 @@ from hiero_mark import make_hiero_date_mark, HIERO_FONT_PATH
 from rfvp64 import RFVP64Codec
 
 _rfvp64 = RFVP64Codec()  # モジュールレベルで1度だけ初期化
+
+# ── QRキャッシュ（TTL=10分・LRU上限=256件） ──────────────────────────
+_QR_CACHE_TTL     = 600   # 10分
+_QR_CACHE_MAXSIZE = 256
+_qr_cache: OrderedDict[str, tuple[Image.Image, float]] = OrderedDict()
+
+def _get_cached_qr(seed_b: int | None, client_ip: str, scale: int, opacity: float) -> Image.Image:
+    now = time.monotonic()
+    if client_ip in _qr_cache:
+        img, ts = _qr_cache[client_ip]
+        if now - ts < _QR_CACHE_TTL:
+            _qr_cache.move_to_end(client_ip)  # LRU更新
+            return img
+        del _qr_cache[client_ip]  # TTL切れ
+    # 生成してキャッシュに追加
+    img = make_qr_mark(seed_b, scale=scale, opacity=opacity, client_ip=client_ip)
+    _qr_cache[client_ip] = (img, now)
+    # LRU上限を超えたら最も古いエントリを削除
+    if len(_qr_cache) > _QR_CACHE_MAXSIZE:
+        _qr_cache.popitem(last=False)
+    return img
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -125,6 +148,7 @@ def embed_watermarks(
     client_ip: str,
     page_index: int = 0,
     *,
+    dt: datetime | None = None,
     qr_count: int = 3,
     qr_scale: int = 3,
     qr_opacity: float = 0.50,
@@ -187,7 +211,7 @@ def embed_watermarks(
 
     # ── QR を qr_count 個配置（IPv4: seed_b hex8文字 / IPv6: hex32文字） ──
     try:
-        qr_mark = make_qr_mark(seed_b, scale=qr_scale, opacity=qr_opacity, client_ip=client_ip)
+        qr_mark = _get_cached_qr(seed_b, client_ip, scale=qr_scale, opacity=qr_opacity)
         qw, qh  = qr_mark.size
         for i in range(qr_count):
             band = top_band if i % 2 == 0 else bottom_band
@@ -203,7 +227,7 @@ def embed_watermarks(
     # ── ヒエログリフ配置（日時情報・IPv4/IPv6共通・フォントなし環境はスキップ） ──
     try:
         hiero_mark = make_hiero_date_mark(
-            datetime.now(tz=timezone.utc),
+            dt if dt is not None else datetime.now(tz=timezone.utc),
             font_size=text_font_size,
             opacity=text_opacity,
             color=text_color,

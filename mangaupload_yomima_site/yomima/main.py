@@ -437,13 +437,15 @@ async def serve_image(
             tile_size = session.get("tile_size", 16)
 
             page_index = int(filename[:4])
+            from datetime import datetime, timezone
+            dt = datetime.fromtimestamp(session["read_at"], tz=timezone.utc)
 
             def process():
                 from PIL import Image as PILImage
                 with PILImage.open(path) as img:
                     img = img.convert("RGB")
                     scrambled = mg.scramble_image_pil(img, seed_b, tile_size)
-                    watermarked = mg.apply_watermark(scrambled, seed_b, client_ip, page_index)
+                    watermarked = mg.apply_watermark(scrambled, seed_b, client_ip, page_index, dt)
                     buf = BytesIO()
                     #scrambled.save(buf, format="PNG")
                     watermarked.save(buf, format="PNG")

@@ -63,6 +63,7 @@ def create_session(cbz_url: str, client_ip: str, tile_size: int = 16) -> str:
         "ip":         client_ip,
         "page_count": None,   # 初回アクセス時に確定
         "tile_size":  tile_size,
+        "read_at":    now,    # 読み開始時刻（ヒエログリフ埋め込み用・全ページ共通）
     }
     _cleanup_expired_sessions()
     return token
@@ -507,8 +508,8 @@ def get_image_path(url_hash: str, filename: str) -> Optional[str]:
     return path if os.path.exists(path) else None
 
 
-def apply_watermark(img: Image.Image, seed_b: int, client_ip: str, page_index: int = 0) -> Image.Image:
-    watermarked = embed_watermarks(img, seed_b, client_ip, page_index)
+def apply_watermark(img: Image.Image, seed_b: int, client_ip: str, page_index: int = 0, dt=None) -> Image.Image:
+    watermarked = embed_watermarks(img, seed_b, client_ip, page_index, dt=dt)
     return watermarked.convert("RGB")
 # ---------------------------------------------------------------------------
 # Manga list serialization
