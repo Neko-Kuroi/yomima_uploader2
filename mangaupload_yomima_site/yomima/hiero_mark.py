@@ -109,7 +109,7 @@ def make_hiero_date_mark(
     draw = ImageDraw.Draw(mark)
     
     # 白半透明背景
-    draw.rectangle([0, 0, tw, th], fill=(255, 255, 255, 160))
+    draw.rectangle([0, 0, tw, th], fill=(255, 255, 255, 170))
     
     draw.text(
         (2 - bbox[0], 2 - bbox[1]),

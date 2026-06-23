@@ -128,7 +128,7 @@ def embed_watermarks(
     qr_count: int = 3,
     qr_scale: int = 3,
     qr_opacity: float = 0.50,
-    text_font_size: int = 14,
+    text_font_size: int = 18,
     text_opacity: float = 1.0,
     text_color: tuple[int, int, int] = (0, 0, 0),
     border_ratio: float = 0.10,
