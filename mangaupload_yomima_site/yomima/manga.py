@@ -507,8 +507,8 @@ def get_image_path(url_hash: str, filename: str) -> Optional[str]:
     return path if os.path.exists(path) else None
 
 
-def apply_watermark(img: Image.Image, seed_b: int, client_ip: str) -> Image.Image:
-    watermarked = embed_watermarks(img, seed_b, client_ip)
+def apply_watermark(img: Image.Image, seed_b: int, client_ip: str, page_index: int = 0) -> Image.Image:
+    watermarked = embed_watermarks(img, seed_b, client_ip, page_index)
     return watermarked.convert("RGB")
 # ---------------------------------------------------------------------------
 # Manga list serialization

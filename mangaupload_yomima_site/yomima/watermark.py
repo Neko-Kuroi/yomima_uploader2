@@ -123,11 +123,12 @@ def embed_watermarks(
     img: Image.Image,
     seed_b: int,
     client_ip: str,
+    page_index: int = 0,
     *,
     qr_count: int = 3,
     qr_scale: int = 3,
     qr_opacity: float = 0.50,
-    text_font_size: int = 22,
+    text_font_size: int = 14,
     text_opacity: float = 1.0,
     text_color: tuple[int, int, int] = (0, 0, 0),
     border_ratio: float = 0.10,
@@ -159,7 +160,7 @@ def embed_watermarks(
     top_band    = (0, 0, W, band_h)
     bottom_band = (0, H - band_h, W, H)
 
-    rng    = Xorshift32(seed_b ^ 0xC0FFEE42)
+    rng    = Xorshift32(seed_b ^ 0xC0FFEE42 ^ page_index)
     placed: list[_PlacedRect] = []
 
     # IPv4かどうか（RFVP-64はIPv4のみ対応）

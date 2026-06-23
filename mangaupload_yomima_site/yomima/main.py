@@ -436,12 +436,14 @@ async def serve_image(
             loop = asyncio.get_running_loop()
             tile_size = session.get("tile_size", 16)
 
+            page_index = int(filename[:4])
+
             def process():
                 from PIL import Image as PILImage
                 with PILImage.open(path) as img:
                     img = img.convert("RGB")
                     scrambled = mg.scramble_image_pil(img, seed_b, tile_size)
-                    watermarked = mg.apply_watermark(scrambled, seed_b, client_ip)
+                    watermarked = mg.apply_watermark(scrambled, seed_b, client_ip, page_index)
                     buf = BytesIO()
                     #scrambled.save(buf, format="PNG")
                     watermarked.save(buf, format="PNG")
