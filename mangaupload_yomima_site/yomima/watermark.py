@@ -50,6 +50,28 @@ def _get_cached_qr(seed_b: int | None, client_ip: str, scale: int, opacity: floa
         _qr_cache.popitem(last=False)
     return img
 
+# ── ヒエログリフキャッシュ（TTL=10分・LRU上限=256件） ─────────────────
+_HIERO_CACHE_TTL     = 600   # 10分
+_HIERO_CACHE_MAXSIZE = 256
+_hiero_cache: OrderedDict[int, tuple[Image.Image, float]] = OrderedDict()
+
+def _get_cached_hiero(dt: datetime, font_size: int, opacity: float,
+                      color: tuple, font_path: Path) -> Image.Image:
+    key = int(dt.timestamp())   # 秒単位のタイムスタンプをキーに
+    now = time.monotonic()
+    if key in _hiero_cache:
+        img, ts = _hiero_cache[key]
+        if now - ts < _HIERO_CACHE_TTL:
+            _hiero_cache.move_to_end(key)
+            return img
+        del _hiero_cache[key]
+    img = make_hiero_date_mark(dt, font_size=font_size, opacity=opacity,
+                               color=color, font_path=font_path)
+    _hiero_cache[key] = (img, now)
+    if len(_hiero_cache) > _HIERO_CACHE_MAXSIZE:
+        _hiero_cache.popitem(last=False)
+    return img
+
 
 # ═══════════════════════════════════════════════════════════════════════
 # Xorshift32（manga.py と同一実装）
@@ -226,7 +248,7 @@ def embed_watermarks(
 
     # ── ヒエログリフ配置（日時情報・IPv4/IPv6共通・フォントなし環境はスキップ） ──
     try:
-        hiero_mark = make_hiero_date_mark(
+        hiero_mark = _get_cached_hiero(
             dt if dt is not None else datetime.now(tz=timezone.utc),
             font_size=text_font_size,
             opacity=text_opacity,
