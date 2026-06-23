@@ -78,6 +78,16 @@
     .scramble-option{display:flex;align-items:center;gap:8px;padding:10px 12px;border:1px solid #cbd5e1;border-radius:4px;cursor:pointer;transition:background .15s}
     .scramble-option:hover{background:#f8fafc}
     .scramble-option input{width:auto}
+    /* サムネイルグリッド */
+    .thumb-grid{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+    .thumb-item{position:relative;width:80px;cursor:grab;border:2px solid transparent;border-radius:4px;transition:border-color .15s;user-select:none}
+    .thumb-item:hover{border-color:#2563eb}
+    .thumb-item.dragging{opacity:.4;border-color:#2563eb}
+    .thumb-item.drag-over{border-color:#10b981;background:#f0fdf4}
+    .thumb-item img{width:80px;height:110px;object-fit:cover;border-radius:3px;display:block;pointer-events:none}
+    .thumb-item .thumb-num{position:absolute;top:2px;left:2px;background:rgba(0,0,0,.6);color:#fff;font-size:.65rem;padding:1px 4px;border-radius:3px;pointer-events:none}
+    .thumb-item .thumb-name{font-size:.6rem;color:#64748b;text-align:center;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;padding:2px 2px 0;max-width:80px}
+    .notice-box{background:#fef9c3;border:1px solid #fde047;border-radius:6px;padding:10px 14px;font-size:.8rem;color:#713f12;margin-bottom:14px;line-height:1.7}
   </style>
 </head>
 <body>
@@ -257,11 +267,19 @@
   <!-- 原稿画像 -->
   <div class="form-group">
     <label>📄 原稿画像（複数可）<span style="font-weight:400;color:#94a3b8"> 1枚10MBまで・合計100MBまで</span></label>
+    <div class="notice-box">
+      ⚠️ <strong>アップロード前にご確認ください</strong><br>
+      • ページ順は<strong>ファイル名順</strong>になります。連番ファイル名（例: 001.jpg, 002.jpg）でご用意ください。<br>
+      • 1枚あたりの画像サイズ上限：<strong>幅1440px・高さ2160px</strong>以内<br>
+      • 上限を超える画像はアップロードできません。<br>
+      • 選択後にサムネイルで順序を確認し、ドラッグで並べ替えできます。
+    </div>
     <div class="drop-zone" id="drop-zone">
       <p>原稿画像をドロップ、またはクリックして選択</p>
       <input type="file" id="file-input" multiple accept="image/*" style="display:none">
     </div>
     <div id="file-list" class="msg-info"></div>
+    <div id="thumb-grid" class="thumb-grid"></div>
   </div>
 
   <button id="upload-btn" class="btn btn-primary btn-block" onclick="startUpload()" disabled style="margin-top:14px">
@@ -680,36 +698,96 @@ dropZone.addEventListener('dragover',  e => { e.preventDefault(); dropZone.style
 dropZone.addEventListener('dragleave', () => dropZone.style.background='#f8fafc');
 dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.style.background='#f8fafc'; handleFiles(e.dataTransfer.files); });
 
-const MAX_PAGE_MB  = 10;
-const MAX_TOTAL_MB = 100;
+const MAX_PAGE_MB   = 10;
+const MAX_TOTAL_MB  = 100;
+const MAX_PX_W      = 1440;
+const MAX_PX_H      = 2160;
 
-function handleFiles(files) {
-  const imgs = Array.from(files).filter(f => f.type.startsWith('image/'));
+// ドラッグ並べ替え用
+let dragSrcIdx = null;
+
+function buildThumbGrid() {
+  const grid = document.getElementById('thumb-grid');
+  grid.innerHTML = '';
+  selectedFiles.forEach((f, i) => {
+    const url  = URL.createObjectURL(f);
+    const item = document.createElement('div');
+    item.className   = 'thumb-item';
+    item.draggable   = true;
+    item.dataset.idx = i;
+    item.innerHTML   = `
+      <img src="${url}">
+      <div class="thumb-num">${i + 1}</div>
+      <div class="thumb-name">${f.name}</div>`;
+
+    item.addEventListener('dragstart', e => {
+      dragSrcIdx = i;
+      setTimeout(() => item.classList.add('dragging'), 0);
+    });
+    item.addEventListener('dragend', () => item.classList.remove('dragging'));
+    item.addEventListener('dragover', e => { e.preventDefault(); item.classList.add('drag-over'); });
+    item.addEventListener('dragleave', () => item.classList.remove('drag-over'));
+    item.addEventListener('drop', e => {
+      e.preventDefault();
+      item.classList.remove('drag-over');
+      if (dragSrcIdx === null || dragSrcIdx === i) return;
+      const moved = selectedFiles.splice(dragSrcIdx, 1)[0];
+      selectedFiles.splice(i, 0, moved);
+      buildThumbGrid();
+      updateFileListLabel();
+    });
+    grid.appendChild(item);
+  });
+}
+
+function updateFileListLabel() {
+  const total = selectedFiles.reduce((s, f) => s + f.size, 0);
+  document.getElementById('file-list').textContent =
+    `${selectedFiles.length} 枚 / 合計 ${(total/1024/1024).toFixed(1)}MB`;
+  document.getElementById('upload-btn').disabled = selectedFiles.length === 0 || !token;
+}
+
+async function handleFiles(files) {
+  const imgs   = Array.from(files).filter(f => f.type.startsWith('image/'));
+  const errors = [];
   let totalSize = 0;
-  const errors  = [];
 
+  // ファイルサイズチェック
   for (const f of imgs) {
-    if (f.size > MAX_PAGE_MB * 1024 * 1024) {
-      errors.push(`${f.name} が ${MAX_PAGE_MB}MB を超えています`);
-    }
+    if (f.size > MAX_PAGE_MB * 1024 * 1024)
+      errors.push(`${f.name}：${MAX_PAGE_MB}MB を超えています`);
     totalSize += f.size;
   }
-  if (totalSize > MAX_TOTAL_MB * 1024 * 1024) {
+  if (totalSize > MAX_TOTAL_MB * 1024 * 1024)
     errors.push(`合計サイズが ${MAX_TOTAL_MB}MB を超えています`);
+
+  // ピクセルサイズチェック（非同期）
+  const pixelChecks = imgs.map(f => new Promise(resolve => {
+    const url = URL.createObjectURL(f);
+    const img = new Image();
+    img.onload  = () => { URL.revokeObjectURL(url); resolve({ f, w: img.width, h: img.height }); };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve({ f, w: 0, h: 0 }); };
+    img.src = url;
+  }));
+  const results = await Promise.all(pixelChecks);
+  for (const { f, w, h } of results) {
+    if (w > MAX_PX_W || h > MAX_PX_H)
+      errors.push(`${f.name}：画像サイズ ${w}×${h}px が上限（${MAX_PX_W}×${MAX_PX_H}px）を超えています`);
   }
 
   if (errors.length) {
     document.getElementById('file-list').innerHTML =
       `<span style="color:#dc2626">${errors.join('<br>')}</span>`;
     selectedFiles = [];
+    document.getElementById('thumb-grid').innerHTML = '';
     document.getElementById('upload-btn').disabled = true;
     return;
   }
 
-  selectedFiles = imgs;
-  document.getElementById('file-list').textContent =
-    `${imgs.length} 枚 / 合計 ${(totalSize/1024/1024).toFixed(1)}MB`;
-  document.getElementById('upload-btn').disabled = imgs.length === 0 || !token;
+  // ファイル名順にソート
+  selectedFiles = imgs.sort((a, b) => a.name.localeCompare(b.name, 'ja', { numeric: true }));
+  buildThumbGrid();
+  updateFileListLabel();
 }
 
 /* ── ファイル選択（バンプ画像） ── */
@@ -754,7 +832,12 @@ async function startUpload() {
 
   try {
     const fd = new FormData();
-    selectedFiles.forEach(f => fd.append('files', f));
+    selectedFiles.forEach((f, i) => {
+      const ext      = f.name.substring(f.name.lastIndexOf('.'));
+      const newName  = String(i + 1).padStart(4, '0') + ext;
+      const renamed  = new File([f], newName, { type: f.type });
+      fd.append('files', renamed);
+    });
     if (selectedCover) fd.append('cover', selectedCover);
 
     const uploadUrl = `/api/author/titles/${tId}/episodes/${eId}/upload-and-zip`

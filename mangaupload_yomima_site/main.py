@@ -62,6 +62,8 @@ MAX_PAGE_SIZE_BYTES          = MAX_PAGE_SIZE_MB  * 1024 * 1024
 MAX_TOTAL_SIZE_BYTES         = MAX_TOTAL_SIZE_MB * 1024 * 1024
 MAX_COVER_SIZE_BYTES         = MAX_COVER_SIZE_MB * 1024 * 1024
 DISPLAY_MAX_SIZE             = (1200, 1800)
+PADDING_CANVAS_SIZE          = (720, 1080)   # DISPLAY_MAX_SIZEの60%
+PADDING_THRESHOLD            = (600, 900)    # これ以下の場合パディング適用
 THUMB_SIZE                   = (150, 220)
 TILE_SIZE_DEFAULT            = 16
 CHARSET_62                   = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
@@ -737,8 +739,17 @@ def _process_upload(
                 f.write(content)
 
             with Image.open(raw_path) as img:
-                img = img.convert("RGB")
+                img = img.convert("RGBA")
+                w, h = img.size
+                # 小さすぎる画像はパディングキャンバスにセンター配置
+                if w <= PADDING_THRESHOLD[0] or h <= PADDING_THRESHOLD[1]:
+                    canvas = Image.new("RGBA", PADDING_CANVAS_SIZE, (0, 0, 0, 0))
+                    offset_x = (PADDING_CANVAS_SIZE[0] - w) // 2
+                    offset_y = (PADDING_CANVAS_SIZE[1] - h) // 2
+                    canvas.paste(img, (offset_x, offset_y))
+                    img = canvas
                 img.thumbnail(DISPLAY_MAX_SIZE, Image.LANCZOS)
+                img = img.convert("RGB")
                 resized_path = work_dir / f"resized_{index:04d}.png"
                 img.save(resized_path, "PNG")
 
