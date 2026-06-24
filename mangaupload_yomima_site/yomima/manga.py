@@ -52,7 +52,7 @@ SESSION_TTL_SECONDS = 3600        # セッション有効期限1時間
 # { session_token: { cbz_url, created_at, expires_at, ip, page_count } }
 _session_store: dict[str, dict] = {}
 
-def create_session(cbz_url: str, client_ip: str, tile_size: int = 16) -> str:
+def create_session(cbz_url: str, client_ip: str, tile_size: int = 16, scrambled: bool = True) -> str:
     """セッショントークンを発行する"""
     token = secrets.token_urlsafe(32)   # 推測不可能な43文字
     now   = time.time()
@@ -63,6 +63,7 @@ def create_session(cbz_url: str, client_ip: str, tile_size: int = 16) -> str:
         "ip":         client_ip,
         "page_count": None,   # 初回アクセス時に確定
         "tile_size":  tile_size,
+        "scrambled":  scrambled,
         "read_at":    now,    # 読み開始時刻（ヒエログリフ埋め込み用・全ページ共通）
         "seed_b":     ip_to_seed_b(client_ip),  # 一度だけ計算
     }
@@ -208,6 +209,8 @@ def download_file(
         headers.update(extra_headers)
         response = requests.get(url, stream=True, timeout=(10, 60), headers=headers)
         response.raise_for_status()
+        if progress_callback:
+            progress_callback(0.0)  # 接続確立を通知
         total_size = int(response.headers.get('content-length', 0))
 
         if total_size > 0 and total_size > max_bytes:

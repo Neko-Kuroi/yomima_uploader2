@@ -1005,16 +1005,19 @@ async def issue_cbz_token(
         raise HTTPException(status_code=403, detail="内部アクセスのみ許可")
     ep, user_dir, settings_path = resolve_episode_by_public_id(public_id, db)
     tile_size = TILE_SIZE_DEFAULT
+    scrambled = True
     if settings_path.exists():
         try:
             with open(settings_path) as f:
                 meta = json.load(f)
             tile_size = meta.get("tile_size", TILE_SIZE_DEFAULT)
+            scrambled = meta.get("scrambled", True)
         except Exception:
             pass
     return {
         "cbz_token": _make_cbz_token(public_id),
         "tile_size": tile_size,
+        "scrambled": scrambled,
     }
 
 # ---------------------------------------------------------------------------

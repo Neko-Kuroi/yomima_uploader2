@@ -162,6 +162,7 @@ async def create_session(
     client_ip = get_client_ip(request)
     cbz_token = None
     tile_size = 16
+    scrambled = True  # デフォルトはスクランブルあり
 
     # プラットフォームのCBZ URLの場合のみトークンをアップローダーに発行依頼
     if "/api/public/cbz/" in url:
@@ -177,10 +178,11 @@ async def create_session(
                     data      = r.json()
                     cbz_token = data.get("cbz_token")
                     tile_size = data.get("tile_size", 16)
+                    scrambled = data.get("scrambled", True)
         except Exception as e:
             logger.warning(f"cbz_token取得失敗: {e}")
 
-    token = mg.create_session(url, client_ip, tile_size=tile_size)
+    token = mg.create_session(url, client_ip, tile_size=tile_size, scrambled=scrambled)
 
     return {
         "session_token": token,
@@ -415,70 +417,49 @@ async def serve_image(
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="画像が見つかりません")
 
-    client_ip = get_client_ip(request)
+    client_ip  = get_client_ip(request)
+    seed_b     = session["seed_b"]
+    is_scrambled = session.get("scrambled", True)
+    tile_size  = session.get("tile_size", 16)
+    page_index = int(filename[:4]) if filename[:4].isdigit() else 0
+    from datetime import datetime, timezone
+    dt = datetime.fromtimestamp(session["read_at"], tz=timezone.utc)
 
-    # プラットフォーム画像（スクランブル済み）のみ二重スクランブルを適用
-    if mg.is_scrambled_filename(filename):
-        seed_b            = session["seed_b"]
-        delivery_filename = mg.make_delivery_filename(filename, seed_b)
+    # delivery_filenameはScrambleBありなしで変わる
+    delivery_filename = mg.make_delivery_filename(filename, seed_b) if is_scrambled else filename
+    cache_key  = f"{url_hash}_{delivery_filename}"
+    cache_dir  = os.path.join(mg.get_cache_dir(), "delivery")
+    os.makedirs(cache_dir, exist_ok=True)
+    cache_path = os.path.join(cache_dir, cache_key)
 
-        # IPキャッシュキー: {url_hash}_{delivery_filename}
-        cache_key  = f"{url_hash}_{delivery_filename}"
-        cache_dir  = os.path.join(mg.get_cache_dir(), "delivery")
-        os.makedirs(cache_dir, exist_ok=True)
-        cache_path = os.path.join(cache_dir, cache_key)
+    if os.path.exists(cache_path):
+        with open(cache_path, "rb") as f:
+            data = f.read()
+    else:
+        loop = asyncio.get_running_loop()
 
-        if os.path.exists(cache_path):
-            with open(cache_path, "rb") as f:
-                data = f.read()
-        else:
-            # seed_Bでscrambleしてキャッシュに保存
-            loop = asyncio.get_running_loop()
-            tile_size = session.get("tile_size", 16)
+        def process():
+            from PIL import Image as PILImage
+            with PILImage.open(path) as img:
+                img = img.convert("RGB")
+                if is_scrambled:
+                    img = mg.scramble_image_pil(img, seed_b, tile_size)
+                watermarked = mg.apply_watermark(img, seed_b, client_ip, page_index, dt)
+                buf = BytesIO()
+                watermarked.save(buf, format="PNG")
+                return buf.getvalue()
 
-            page_index = int(filename[:4])
-            from datetime import datetime, timezone
-            dt = datetime.fromtimestamp(session["read_at"], tz=timezone.utc)
+        data = await loop.run_in_executor(_executor, process)
+        with open(cache_path, "wb") as f:
+            f.write(data)
 
-            def process():
-                from PIL import Image as PILImage
-                with PILImage.open(path) as img:
-                    img = img.convert("RGB")
-                    scrambled = mg.scramble_image_pil(img, seed_b, tile_size)
-                    watermarked = mg.apply_watermark(scrambled, seed_b, client_ip, page_index, dt)
-                    buf = BytesIO()
-                    #scrambled.save(buf, format="PNG")
-                    watermarked.save(buf, format="PNG")
-                    return buf.getvalue()
-
-            data = await loop.run_in_executor(_executor, process)
-            with open(cache_path, "wb") as f:
-                f.write(data)
-
-        return Response(
-            content=data,
-            media_type="image/png",
-            headers={
-                "Content-Disposition": f'inline; filename="{delivery_filename}"',
-                "Cache-Control":       "private, max-age=3600",
-                "X-Content-Type-Options": "nosniff",
-            },
-        )
-
-    # 非スクランブル画像（外部ZIP等）は従来通り
-    loop = asyncio.get_running_loop()
-    data = await loop.run_in_executor(_executor, mg.load_image_bytes, path)
-
-    if data is None:
-        raise HTTPException(status_code=500, detail="画像の読み込みに失敗しました")
-
-    media_type = "image/png" if data[:8] == b'\x89PNG\r\n\x1a\n' else "image/jpeg"
-
+    media_type = "image/png"
     return Response(
         content=data,
         media_type=media_type,
         headers={
-            "Cache-Control": "private, max-age=3600",
+            "Content-Disposition": f'inline; filename="{delivery_filename}"',
+            "Cache-Control":       "private, max-age=3600",
             "X-Content-Type-Options": "nosniff",
         },
     )
@@ -641,13 +622,53 @@ async def discord_send(
         session = mg.validate_session(session_token)
         if not session or session["cbz_url"] != url:
             return HTMLResponse("<span class='status-error'>セッションが無効です</span>")
-
-    url_hash   = hashlib.md5(url.encode()).hexdigest()
-    image_path = os.path.join(mg.get_cache_dir(), f"{url_hash}_extracted", filename)
+    else:
+        return HTMLResponse("<span class='status-error'>セッションが無効です</span>")
 
     webhooks = [w for w in [webhook1, webhook2] if w]
     if not webhooks:
         return HTMLResponse("<span class='status-error'>Webhookが設定されていません</span>")
+
+    url_hash  = hashlib.md5(url.encode()).hexdigest()
+    client_ip = get_client_ip(request)
+    seed_b    = session["seed_b"]
+
+    if mg.is_scrambled_filename(filename):
+        # スクランブルB＋ウォーターマーク済みのdeliveryキャッシュを使う
+        delivery_filename = mg.make_delivery_filename(filename, seed_b)
+        cache_key   = f"{url_hash}_{delivery_filename}"
+        cache_dir   = os.path.join(mg.get_cache_dir(), "delivery")
+        cache_path  = os.path.join(cache_dir, cache_key)
+
+        if not os.path.exists(cache_path):
+            # キャッシュがない場合は生成する
+            src_path = os.path.join(mg.get_cache_dir(), f"{url_hash}_extracted", filename)
+            if not os.path.exists(src_path):
+                return HTMLResponse("<span class='status-error'>画像が見つかりません</span>")
+            loop      = asyncio.get_running_loop()
+            tile_size = session.get("tile_size", 16)
+            page_index = int(filename[:4])
+            from datetime import datetime, timezone
+            dt = datetime.fromtimestamp(session["read_at"], tz=timezone.utc)
+
+            def process():
+                from PIL import Image as PILImage
+                with PILImage.open(src_path) as img:
+                    img       = img.convert("RGB")
+                    scrambled = mg.scramble_image_pil(img, seed_b, tile_size)
+                    watermarked = mg.apply_watermark(scrambled, seed_b, client_ip, page_index, dt)
+                    buf = BytesIO()
+                    watermarked.save(buf, format="PNG")
+                    return buf.getvalue()
+
+            os.makedirs(cache_dir, exist_ok=True)
+            data = await loop.run_in_executor(_executor, process)
+            with open(cache_path, "wb") as f:
+                f.write(data)
+
+        image_path = cache_path
+    else:
+        image_path = os.path.join(mg.get_cache_dir(), f"{url_hash}_extracted", filename)
 
     errors = mg.send_image_to_discord(image_path, webhooks, filename)
     if errors:
