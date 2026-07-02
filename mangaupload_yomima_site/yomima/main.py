@@ -33,7 +33,18 @@ from starlette.responses import Response as StarletteResponse
 import manga as mg
 
 # ScrambleC（外部ストレージ利用時のみ）
+#try:
+#    from scramble_c import scramble_c_decrypt, derive_seed_c
+#    SCRAMBLE_C_AVAILABLE = True
+#except ImportError:
+#    SCRAMBLE_C_AVAILABLE = False
+
+import sys
+# ScrambleC（外部ストレージ利用時のみ）
 try:
+    _PARENT_DIR = str(Path(__file__).resolve().parent.parent)
+    if _PARENT_DIR not in sys.path:
+        sys.path.insert(0, _PARENT_DIR)
     from scramble_c import scramble_c_decrypt, derive_seed_c
     SCRAMBLE_C_AVAILABLE = True
 except ImportError:
