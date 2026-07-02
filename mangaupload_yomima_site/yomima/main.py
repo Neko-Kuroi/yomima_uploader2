@@ -32,6 +32,13 @@ from starlette.responses import Response as StarletteResponse
 
 import manga as mg
 
+# ScrambleC（外部ストレージ利用時のみ）
+try:
+    from scramble_c import scramble_c_decrypt, derive_seed_c
+    SCRAMBLE_C_AVAILABLE = True
+except ImportError:
+    SCRAMBLE_C_AVAILABLE = False
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -159,10 +166,12 @@ async def create_session(
     if not mg.validate_manga_url(url):
         raise HTTPException(status_code=400, detail="無効なURL")
 
-    client_ip = get_client_ip(request)
-    cbz_token = None
-    tile_size = 16
-    scrambled = True  # デフォルトはスクランブルあり
+    client_ip      = get_client_ip(request)
+    cbz_token      = None
+    tile_size      = 16
+    scrambled      = True
+    storage_url    = None
+    storage_status = "active"
 
     # プラットフォームのCBZ URLの場合のみトークンをアップローダーに発行依頼
     if "/api/public/cbz/" in url:
@@ -175,14 +184,26 @@ async def create_session(
                     headers={"x-internal-key": INTERNAL_API_KEY},
                 )
                 if r.status_code == 200:
-                    data      = r.json()
-                    cbz_token = data.get("cbz_token")
-                    tile_size = data.get("tile_size", 16)
-                    scrambled = data.get("scrambled", True)
+                    data           = r.json()
+                    cbz_token      = data.get("cbz_token")
+                    tile_size      = data.get("tile_size", 16)
+                    scrambled      = data.get("scrambled", True)
+                    storage_url    = data.get("storage_url")    # gigafile URL（あれば）
+                    storage_status = data.get("storage_status", "active")
         except Exception as e:
             logger.warning(f"cbz_token取得失敗: {e}")
 
-    token = mg.create_session(url, client_ip, tile_size=tile_size, scrambled=scrambled)
+    # 配信終了チェック
+    if storage_status in ("expired", "deleted"):
+        raise HTTPException(status_code=410, detail="配信終了")
+
+    token = mg.create_session(
+        url,
+        client_ip,
+        tile_size=tile_size,
+        scrambled=scrambled,
+        storage_url=storage_url,
+    )
 
     return {
         "session_token": token,
@@ -442,6 +463,10 @@ async def serve_image(
             from PIL import Image as PILImage
             with PILImage.open(path) as img:
                 img = img.convert("RGB")
+                # ScrambleC復号（gigafileからのCBZのみ）
+                if SCRAMBLE_C_AVAILABLE and session.get("storage_url"):
+                    seed_c = derive_seed_c(filename)
+                    img    = scramble_c_decrypt(img, seed_c)
                 if is_scrambled:
                     img = mg.scramble_image_pil(img, seed_b, tile_size)
                 watermarked = mg.apply_watermark(img, seed_b, client_ip, page_index, dt)
@@ -490,9 +515,11 @@ async def download_start(
             loop.call_soon_threadsafe(queue.put_nowait, p)
 
         def run_download():
-            download_url  = url
+            # gigafile URLがあればそちらを優先
+            storage_url   = session.get("storage_url")
+            download_url  = storage_url if storage_url else url
             extra_headers = {}
-            if cbz_token and "/api/public/cbz/" in url:
+            if not storage_url and cbz_token and "/api/public/cbz/" in url:
                 download_url  = f"{url}?cbz_token={cbz_token}"
                 extra_headers = {"Referer": get_viewer_base_url()}
             success, err = mg.download_file(

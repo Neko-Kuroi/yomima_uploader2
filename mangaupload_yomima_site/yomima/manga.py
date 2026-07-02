@@ -52,20 +52,21 @@ SESSION_TTL_SECONDS = 3600        # セッション有効期限1時間
 # { session_token: { cbz_url, created_at, expires_at, ip, page_count } }
 _session_store: dict[str, dict] = {}
 
-def create_session(cbz_url: str, client_ip: str, tile_size: int = 16, scrambled: bool = True) -> str:
+def create_session(cbz_url: str, client_ip: str, tile_size: int = 16, scrambled: bool = True, storage_url: str | None = None) -> str:
     """セッショントークンを発行する"""
     token = secrets.token_urlsafe(32)   # 推測不可能な43文字
     now   = time.time()
     _session_store[token] = {
-        "cbz_url":    cbz_url,
-        "created_at": now,
-        "expires_at": now + SESSION_TTL_SECONDS,
-        "ip":         client_ip,
-        "page_count": None,   # 初回アクセス時に確定
-        "tile_size":  tile_size,
-        "scrambled":  scrambled,
-        "read_at":    now,    # 読み開始時刻（ヒエログリフ埋め込み用・全ページ共通）
-        "seed_b":     ip_to_seed_b(client_ip),  # 一度だけ計算
+        "cbz_url":     cbz_url,
+        "created_at":  now,
+        "expires_at":  now + SESSION_TTL_SECONDS,
+        "ip":          client_ip,
+        "page_count":  None,
+        "tile_size":   tile_size,
+        "scrambled":   scrambled,
+        "storage_url": storage_url,   # gigafile URL（ローカルの場合はNone）
+        "read_at":     now,
+        "seed_b":      ip_to_seed_b(client_ip),
     }
     _cleanup_expired_sessions()
     return token

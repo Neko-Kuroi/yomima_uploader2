@@ -14,7 +14,7 @@ import hmac as hmac_lib
 import numpy as np
 from io import BytesIO
 from pathlib import Path
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, UTC, timezone
 from typing import List, Generator, Optional
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Request, BackgroundTasks, Query, Header
@@ -29,6 +29,15 @@ from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignK
 from sqlalchemy.orm import sessionmaker, declarative_base, Session, relationship, joinedload
 from slowapi import Limiter
 from slowapi.util import get_remote_address
+
+# 外部ストレージ関連
+try:
+    from scramble_c import scramble_c_encrypt, derive_seed_c
+    from gigafile import gigafile_upload
+    import storage as st
+    EXTERNAL_STORAGE_AVAILABLE = True
+except ImportError:
+    EXTERNAL_STORAGE_AVAILABLE = False
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -186,6 +195,12 @@ class Episode(Base):
     cbz_path    = Column(String,  default="")
     feedback    = Column(String,  default="")
     created_at  = Column(DateTime, default=datetime.utcnow)
+    # 外部ストレージ
+    storage_type                = Column(String,   default="local")
+    storage_status              = Column(String,   default="active")
+    storage_base_url_encrypted  = Column(String,   nullable=True)
+    storage_del_key_encrypted   = Column(String,   nullable=True)
+    storage_expires_at          = Column(DateTime, nullable=True)
     work        = relationship("Work", back_populates="episodes")
     tags        = relationship("EpisodeTag", back_populates="episode")
     warnings    = relationship("EpisodeWarning", back_populates="episode")
@@ -267,6 +282,26 @@ def run_migrations() -> None:
             cur.execute("ALTER TABLE episodes ADD COLUMN feedback VARCHAR DEFAULT ''")
             con.commit()
             logger.info("Migration: episodes.feedback added")
+        if "storage_type" not in existing_cols:
+            cur.execute("ALTER TABLE episodes ADD COLUMN storage_type VARCHAR DEFAULT 'local'")
+            con.commit()
+            logger.info("Migration: episodes.storage_type added")
+        if "storage_status" not in existing_cols:
+            cur.execute("ALTER TABLE episodes ADD COLUMN storage_status VARCHAR DEFAULT 'active'")
+            con.commit()
+            logger.info("Migration: episodes.storage_status added")
+        if "storage_base_url_encrypted" not in existing_cols:
+            cur.execute("ALTER TABLE episodes ADD COLUMN storage_base_url_encrypted VARCHAR")
+            con.commit()
+            logger.info("Migration: episodes.storage_base_url_encrypted added")
+        if "storage_del_key_encrypted" not in existing_cols:
+            cur.execute("ALTER TABLE episodes ADD COLUMN storage_del_key_encrypted VARCHAR")
+            con.commit()
+            logger.info("Migration: episodes.storage_del_key_encrypted added")
+        if "storage_expires_at" not in existing_cols:
+            cur.execute("ALTER TABLE episodes ADD COLUMN storage_expires_at DATETIME")
+            con.commit()
+            logger.info("Migration: episodes.storage_expires_at added")
         cur.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS ix_episodes_public_id
             ON episodes (public_id)
@@ -766,6 +801,10 @@ def _process_upload(
                     seed_hex = page_filename[4:12]
                     seed     = int(seed_hex, 16)
                     img      = scramble_image(img, seed, tile_size)
+                # ScrambleC（外部ストレージ利用時のみ）
+                if EXTERNAL_STORAGE_AVAILABLE:
+                    seed_c = derive_seed_c(page_filename)
+                    img    = scramble_c_encrypt(img, seed_c)
                 img.save(page_path, "PNG")
 
             saved_pages.append(page_path)
@@ -777,6 +816,50 @@ def _process_upload(
             for i, p in enumerate(saved_pages):
                 update_progress(job_id, "zip", i + 1, len(saved_pages))
                 comic_zip.write(p, arcname=p.name)
+
+        # 外部ストレージへアップロード
+        if EXTERNAL_STORAGE_AVAILABLE:
+            try:
+                update_progress(job_id, "upload", 0, 1)
+                lifetime_days = int(os.environ.get("GIGAFILE_LIFETIME_DAYS", "100"))
+                result = gigafile_upload(
+                    str(final_zip_path),
+                    lifetime_days=lifetime_days,
+                    progress=False,
+                )
+                expires_at = datetime.now(tz=timezone.utc) + timedelta(days=lifetime_days)
+
+                # DBに保存
+                db = SessionLocal()
+                try:
+                    ep = db.query(Episode).filter(Episode.id == episode_id).first()
+                    if ep:
+                        st.store_gigafile_result(
+                            ep,
+                            url        = result["url"],
+                            del_key    = result.get("del_key"),
+                            expires_at = expires_at,
+                            db         = db,
+                        )
+                finally:
+                    db.close()
+
+                # ローカルCBZを削除
+                final_zip_path.unlink(missing_ok=True)
+                update_progress(job_id, "upload", 1, 1)
+                logger.info(f"gigafile upload OK: {result['url']}")
+            except Exception as e:
+                logger.error(f"gigafile upload error [{job_id}]: {e}")
+                # アップロード失敗時はローカルに残してstatus=error
+                db = SessionLocal()
+                try:
+                    ep = db.query(Episode).filter(Episode.id == episode_id).first()
+                    if ep:
+                        ep.storage_type   = st.STORAGE_TYPE_GIGAFILE
+                        ep.storage_status = st.STORAGE_STATUS_ERROR
+                        db.commit()
+                finally:
+                    db.close()
 
         if cover_content and cover_filename:
             cover_path = user_dir / f"episode_{episode_id}_cover.jpg"
@@ -1014,10 +1097,18 @@ async def issue_cbz_token(
             scrambled = meta.get("scrambled", True)
         except Exception:
             pass
+    # ストレージURL（gigafileの場合は復号して返す）
+    storage_url    = None
+    storage_status = ep.storage_status if hasattr(ep, 'storage_status') else "active"
+    if EXTERNAL_STORAGE_AVAILABLE and getattr(ep, 'storage_type', 'local') == st.STORAGE_TYPE_GIGAFILE:
+        storage_url = st.get_storage_url(ep)
+
     return {
-        "cbz_token": _make_cbz_token(public_id),
-        "tile_size": tile_size,
-        "scrambled": scrambled,
+        "cbz_token":     _make_cbz_token(public_id),
+        "tile_size":     tile_size,
+        "scrambled":     scrambled,
+        "storage_url":   storage_url,
+        "storage_status": storage_status,
     }
 
 # ---------------------------------------------------------------------------
