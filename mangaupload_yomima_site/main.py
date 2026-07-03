@@ -679,11 +679,17 @@ async def get_my_works(
                 meta = json.load(f)
             cbz_path   = settings_path.parent / f"episode_{meta['episode_id']}.cbz"
             cover_path = settings_path.parent / f"episode_{meta['episode_id']}_cover.jpg"
-            meta["has_cbz"]   = cbz_path.exists()
-            meta["has_cover"] = cover_path.exists()
             ep = db.query(Episode).filter_by(
                 id=meta["episode_id"], work_id=meta["title_id"]
             ).first()
+            has_local_cbz  = cbz_path.exists()
+            has_remote_cbz = bool(
+                ep is not None
+                and getattr(ep, "storage_type", "local") != "local"
+                and getattr(ep, "storage_status", "active") == "active"
+            )
+            meta["has_cbz"]   = has_local_cbz or has_remote_cbz
+            meta["has_cover"] = cover_path.exists()
             meta["public_id"] = ep.public_id if ep else None
             works.append(meta)
         except Exception:
