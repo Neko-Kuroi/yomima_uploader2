@@ -510,10 +510,12 @@ async def download_start(
     request:   Request,
     url:       str = Query(...),
     cbz_token: str = Query(default=""),
+    session_token: str = Query(default=""),
 ):
     file_ext     = os.path.splitext(url.split('?')[0])[-1].lower()
     archive_path = mg.get_cache_path(url) + file_ext
 
+    session = mg.validate_session(session_token) if session_token else None
     async def event_stream():
         if os.path.exists(archive_path):
             yield "data: done\n\n"
@@ -527,7 +529,8 @@ async def download_start(
 
         def run_download():
             # gigafile URLがあればそちらを優先
-            storage_url   = session.get("storage_url")
+            //storage_url   = session.get("storage_url")
+            storage_url   = session.get("storage_url") if session else None
             download_url  = storage_url if storage_url else url
             extra_headers = {}
             if not storage_url and cbz_token and "/api/public/cbz/" in url:

@@ -581,7 +581,8 @@ function startDownload() {
   const label = document.getElementById('dl-label');
   area.hidden = false;
 
-  const es = new EventSource('/download/start?url=' + encodeURIComponent(mangaUrl) + (cbzToken ? '&cbz_token=' + encodeURIComponent(cbzToken) : ''));
+  //const es = new EventSource('/download/start?url=' + encodeURIComponent(mangaUrl) + (cbzToken ? '&cbz_token=' + encodeURIComponent(cbzToken) : ''));
+  const es = new EventSource('/download/start?url=' + encodeURIComponent(mangaUrl) + '&session_token=' + encodeURIComponent(sessionToken) + (cbzToken ? '&cbz_token=' + encodeURIComponent(cbzToken) : ''));
   let ok   = false;
   es.onmessage = e => {
     if (e.data === 'done') {
