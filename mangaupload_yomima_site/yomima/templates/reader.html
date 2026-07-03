@@ -592,7 +592,11 @@ function startDownload() {
       setTimeout(() => { area.hidden = true; init(); }, 400);
     } else if (e.data.startsWith('error:')) {
       ok = true; label.textContent = '❌ ' + e.data.slice(6);
-      es.close(); _sseActive = false;
+      es.close();
+      // cbz_token（nonce使い捨て）は一度失敗すると再利用できないため、
+      // 次の自動リトライ（fetchBatchのpending検知）が古いトークンを
+      // 使い回さないよう、_sseActive解除前に必ず再取得する。
+      initSession().finally(() => { _sseActive = false; });
     } else {
       bar.style.width   = Math.round(parseFloat(e.data) * 100) + '%';
       label.textContent = `ダウンロード中… ${Math.round(parseFloat(e.data)*100)}%`;
@@ -601,7 +605,8 @@ function startDownload() {
   es.onerror = () => {
     es.close();
     if (!ok) label.textContent = '❌ 接続エラー';
-    _sseActive = false;
+    // こちらも同様に、リトライ前にcbz_tokenを再取得してから解除する
+    initSession().finally(() => { _sseActive = false; });
   };
 }
 

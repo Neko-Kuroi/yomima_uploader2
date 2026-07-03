@@ -311,6 +311,51 @@ def gigafile_download(
 
 
 # ===========================================================================
+# プロキシストリーミング（ディスクに保存せずそのまま転送する）
+# ===========================================================================
+async def gigafile_proxy_stream_async(
+    page_url: str,
+    dl_password: str | None = None,
+):
+    """
+    Gigafileの案内ページURLから実ファイルを取得し、ディスクに保存せず
+    チャンク単位でそのままyieldする。プラットフォーム側でのプロキシ配信用。
+
+    gigafile_download_async() と同じ「ページ取得 → サーバー抽出 →
+    download.php URL組み立て」のロジックを流用しているが、ローカルファイルへの
+    書き込みは行わず、呼び出し元（StreamingResponse等）にバイト列を渡すだけ。
+    """
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(
+                page_url, timeout=aiohttp.ClientTimeout(total=30),
+            ) as resp:
+                resp.raise_for_status()
+                page_html = await resp.text()
+        except aiohttp.ClientError as e:
+            raise RuntimeError(f"ダウンロードページ取得失敗: {e}") from e
+
+        server_match = SERVER_RE.search(page_html)
+        server = server_match.group(1) if server_match else urlparse(page_url).netloc
+
+        file_id_match = re.search(r"/([a-z0-9-]+)$", page_url)
+        if not file_id_match:
+            raise RuntimeError("ファイルIDを抽出できませんでした")
+        file_id = file_id_match.group(1)
+
+        download_url = f"https://{server}/download.php?file={file_id}"
+        if dl_password:
+            download_url += f"&dlkey={dl_password}"
+
+        async with session.get(
+            download_url, timeout=aiohttp.ClientTimeout(total=300),
+        ) as resp:
+            resp.raise_for_status()
+            async for chunk in resp.content.iter_chunked(STREAM_CHUNK_BYTES):
+                yield chunk
+
+
+# ===========================================================================
 # 削除
 # ===========================================================================
 async def gigafile_delete_async(

@@ -33,7 +33,7 @@ from slowapi.util import get_remote_address
 # 外部ストレージ関連
 try:
     from scramble_c import scramble_c_encrypt, derive_seed_c
-    from gigafile import gigafile_upload
+    from gigafile import gigafile_upload, gigafile_proxy_stream_async
     import storage as st
     EXTERNAL_STORAGE_AVAILABLE = True
 except ImportError:
@@ -679,17 +679,11 @@ async def get_my_works(
                 meta = json.load(f)
             cbz_path   = settings_path.parent / f"episode_{meta['episode_id']}.cbz"
             cover_path = settings_path.parent / f"episode_{meta['episode_id']}_cover.jpg"
+            meta["has_cbz"]   = cbz_path.exists()
+            meta["has_cover"] = cover_path.exists()
             ep = db.query(Episode).filter_by(
                 id=meta["episode_id"], work_id=meta["title_id"]
             ).first()
-            has_local_cbz  = cbz_path.exists()
-            has_remote_cbz = bool(
-                ep is not None
-                and getattr(ep, "storage_type", "local") != "local"
-                and getattr(ep, "storage_status", "active") == "active"
-            )
-            meta["has_cbz"]   = has_local_cbz or has_remote_cbz
-            meta["has_cover"] = cover_path.exists()
             meta["public_id"] = ep.public_id if ep else None
             works.append(meta)
         except Exception:
@@ -1161,8 +1155,37 @@ async def serve_public_cbz(
     if meta.get("status") != "published":
         raise HTTPException(status_code=403, detail="この作品は非公開です")
     cbz_path = user_dir / f"episode_{ep.id}.cbz"
+
+    # ローカルにファイルが無い場合、外部ストレージ（gigafile）経由でのプロキシ配信を試みる
     if not cbz_path.exists():
-        raise HTTPException(status_code=404, detail="CBZファイルが見つかりません")
+        if not (
+            EXTERNAL_STORAGE_AVAILABLE
+            and getattr(ep, "storage_type", "local") == st.STORAGE_TYPE_GIGAFILE
+        ):
+            raise HTTPException(status_code=404, detail="CBZファイルが見つかりません")
+
+        if not st.is_available(ep):
+            raise HTTPException(status_code=410, detail="配信終了（ストレージ期限切れ）")
+
+        storage_url = st.get_storage_url(ep)
+        if not storage_url:
+            logger.error(f"[DEBUG CBZ] gigafile storage_url復号失敗 episode_id={ep.id}")
+            raise HTTPException(status_code=502, detail="外部ストレージURLの取得に失敗しました")
+
+        increment_view_count(settings_path, client_ip)
+        try:
+            return StreamingResponse(
+                gigafile_proxy_stream_async(storage_url),
+                media_type="application/zip",
+                headers={
+                    "Content-Disposition": f'inline; filename="{public_id}.cbz"',
+                    "Cache-Control":       "private, no-store",
+                },
+            )
+        except Exception as e:
+            logger.error(f"[DEBUG CBZ] gigafile proxy error: {e}")
+            raise HTTPException(status_code=502, detail="外部ストレージからの取得に失敗しました")
+
     increment_view_count(settings_path, client_ip)
     return FileResponse(
         path=str(cbz_path),
