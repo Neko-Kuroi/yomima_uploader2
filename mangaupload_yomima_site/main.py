@@ -52,9 +52,13 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # ディレクトリ準備
 # ---------------------------------------------------------------------------
-STATIC_DIR    = Path("./static")
-TMP_DIR       = Path("./storage/tmp")
-FINAL_ZIP_DIR = Path("./storage/zips")
+#STATIC_DIR    = Path("./static")
+#TMP_DIR       = Path("./storage/tmp")
+#FINAL_ZIP_DIR = Path("./storage/zips")
+BASE_DIR      = Path(__file__).resolve().parent
+STATIC_DIR    = BASE_DIR / "static"
+TMP_DIR       = BASE_DIR / "storage" / "tmp"
+FINAL_ZIP_DIR = BASE_DIR / "storage" / "zips"
 for d in [STATIC_DIR, TMP_DIR, FINAL_ZIP_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
@@ -87,7 +91,8 @@ _VIEWER_BASE_URL_ENV = os.environ.get("VIEWER_BASE_URL", "")
 
 def get_viewer_base_url() -> str:
     """viewer_url.txt があればそちらを優先、なければ環境変数、最後にlocalhost"""
-    url_file = Path("./viewer_url.txt")
+    #url_file = Path("./viewer_url.txt")
+    url_file = BASE_DIR / "viewer_url.txt"
     if url_file.exists():
         val = url_file.read_text().strip()
         if val.startswith("http"):
@@ -158,7 +163,8 @@ def _verify_cbz_token(token: str, public_id: str) -> bool:
 # ---------------------------------------------------------------------------
 # データベース
 # ---------------------------------------------------------------------------
-DATABASE_URL = "sqlite:///./storage/manga_platform.db"
+#DATABASE_URL = "sqlite:///./storage/manga_platform.db"
+DATABASE_URL = f"sqlite:///{BASE_DIR / 'storage' / 'manga_platform.db'}"
 engine       = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base         = declarative_base()
