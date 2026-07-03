@@ -17,6 +17,8 @@ exposed_url = ""
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+os.chdir(BASE_DIR)  # 呼び出し時のcwdに関わらず、必ず自分のディレクトリを基準にする
 current_directory = os.getcwd()
 
 # ログ読み取り関数は削除またはコメントアウト
