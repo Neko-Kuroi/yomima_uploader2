@@ -180,7 +180,7 @@ def setup_cloudflare_tunnel():
     # FastAPI起動
     print("🚀 FastAPI アプリケーションを起動しています...")
     flask_process = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "main:app", "--reload", "--host", "0.0.0.0", "--port", "8000"],
+        [sys.executable, "-m", "uvicorn", "main:app", "--reload", "--host", "0.0.0.0", "--port", "8000", "--loop", "asyncio"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
