@@ -44,7 +44,7 @@ import sys
 try:
     _PARENT_DIR = str(Path(__file__).resolve().parent.parent)
     if _PARENT_DIR not in sys.path:
-        sys.path.insert(0, _PARENT_DIR)
+        sys.path.append(_PARENT_DIR)
     from scramble_c import scramble_c_decrypt, derive_seed_c
     SCRAMBLE_C_AVAILABLE = True
 except ImportError:
