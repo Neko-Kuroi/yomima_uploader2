@@ -529,7 +529,7 @@ async def download_start(
 
         def run_download():
             # gigafile URLがあればそちらを優先
-            //storage_url   = session.get("storage_url")
+            # storage_url   = session.get("storage_url")
             storage_url   = session.get("storage_url") if session else None
             download_url  = storage_url if storage_url else url
             extra_headers = {}
