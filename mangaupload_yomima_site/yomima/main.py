@@ -512,10 +512,15 @@ async def download_start(
     cbz_token: str = Query(default=""),
     session_token: str = Query(default=""),
 ):
+    session = mg.validate_session(session_token) if session_token else None
+    if not session:
+        raise HTTPException(status_code=403, detail="セッションが無効または期限切れです。ページを再読み込みしてください。")
+    if session["cbz_url"] != url:
+        raise HTTPException(status_code=403, detail="不正なアクセスです")
+
     file_ext     = os.path.splitext(url.split('?')[0])[-1].lower()
     archive_path = mg.get_cache_path(url) + file_ext
 
-    session = mg.validate_session(session_token) if session_token else None
     async def event_stream():
         if os.path.exists(archive_path):
             yield "data: done\n\n"
@@ -528,12 +533,11 @@ async def download_start(
             loop.call_soon_threadsafe(queue.put_nowait, p)
 
         def run_download():
-            # gigafile URLがあればそちらを優先
-            # storage_url   = session.get("storage_url")
-            storage_url   = session.get("storage_url") if session else None
-            download_url  = storage_url if storage_url else url
+            # プラットフォーム側でgigafile経由も含めて一元的にプロキシ配信するため、
+            # viewer側からstorage_urlへ直接アクセスすることはしない。
+            download_url  = url
             extra_headers = {}
-            if not storage_url and cbz_token and "/api/public/cbz/" in url:
+            if cbz_token and "/api/public/cbz/" in url:
                 download_url  = f"{url}?cbz_token={cbz_token}"
                 extra_headers = {"Referer": get_viewer_base_url()}
             success, err = mg.download_file(
