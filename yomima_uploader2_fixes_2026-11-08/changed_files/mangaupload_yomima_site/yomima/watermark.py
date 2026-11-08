@@ -1,0 +1,325 @@
+"""
+watermark.py
+============
+配信時（seed_B確定後）に不動エリア（上下10%）へ
+QRコードとヒエログリフ文字列を埋め込む透かしモジュール。
+
+埋め込みタイミング:
+    元画像 → scramble(seed_A) → scramble(seed_B) → embed_watermarks() → 配信
+
+位置はすべて seed_B から派生した Xorshift32 で決定するため再現可能。
+ヒエログリフはフォント未インストール時でも QR のみで動作する。
+"""
+
+from __future__ import annotations
+
+import socket
+import time
+from collections import OrderedDict
+from pathlib import Path
+from typing import NamedTuple
+
+from PIL import Image
+
+from qr_mark import make_qr_mark
+from datetime import datetime, timezone
+from hiero_mark import make_hiero_date_mark, HIERO_FONT_PATH
+from rfvp64 import RFVP64Codec
+
+_rfvp64 = RFVP64Codec()  # モジュールレベルで1度だけ初期化
+
+# ── QRキャッシュ（TTL=10分・LRU上限=256件） ──────────────────────────
+_QR_CACHE_TTL     = 600   # 10分
+_QR_CACHE_MAXSIZE = 256
+_qr_cache: OrderedDict[tuple, tuple[Image.Image, float]] = OrderedDict()
+
+def _get_cached_qr(seed_b: int | None, client_ip: str, scale: int, opacity: float) -> Image.Image:
+    # N-17: キーには「結果に効く引数」を全部含める。以前は client_ip
+    # だけだったため、scale や opacity を変えても最初の画像が返った。
+    key = (seed_b, client_ip, scale, opacity)
+    now = time.monotonic()
+    if key in _qr_cache:
+        img, ts = _qr_cache[key]
+        if now - ts < _QR_CACHE_TTL:
+            _qr_cache.move_to_end(key)  # LRU更新
+            return img
+        del _qr_cache[key]  # TTL切れ
+    # 生成してキャッシュに追加
+    img = make_qr_mark(seed_b, scale=scale, opacity=opacity, client_ip=client_ip)
+    _qr_cache[key] = (img, now)
+    # LRU上限を超えたら最も古いエントリを削除
+    if len(_qr_cache) > _QR_CACHE_MAXSIZE:
+        _qr_cache.popitem(last=False)
+    return img
+
+# ── ヒエログリフキャッシュ（TTL=10分・LRU上限=256件） ─────────────────
+_HIERO_CACHE_TTL     = 600   # 10分
+_HIERO_CACHE_MAXSIZE = 256
+_hiero_cache: OrderedDict[tuple, tuple[Image.Image, float]] = OrderedDict()
+
+def _get_cached_hiero(dt: datetime, font_size: int, opacity: float,
+                      color: tuple, font_path: Path) -> Image.Image:
+    # N-17: 時刻の秒だけをキーにすると、font_size や色を変えても
+    # 最初の画像が返ってしまうため、効く引数を全部キーに含める。
+    key = (int(dt.timestamp()), font_size, opacity, tuple(color), str(font_path))
+    now = time.monotonic()
+    if key in _hiero_cache:
+        img, ts = _hiero_cache[key]
+        if now - ts < _HIERO_CACHE_TTL:
+            _hiero_cache.move_to_end(key)
+            return img
+        del _hiero_cache[key]
+    img = make_hiero_date_mark(dt, font_size=font_size, opacity=opacity,
+                               color=color, font_path=font_path)
+    _hiero_cache[key] = (img, now)
+    if len(_hiero_cache) > _HIERO_CACHE_MAXSIZE:
+        _hiero_cache.popitem(last=False)
+    return img
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Xorshift32（manga.py と同一実装）
+# ═══════════════════════════════════════════════════════════════════════
+
+class Xorshift32:
+    def __init__(self, seed: int) -> None:
+        self.state = seed & 0xFFFF_FFFF or 1
+
+    def next(self) -> int:
+        s = self.state
+        s ^= (s << 13) & 0xFFFF_FFFF
+        s ^= (s >> 17) & 0xFFFF_FFFF
+        s ^= (s << 5)  & 0xFFFF_FFFF
+        self.state = s & 0xFFFF_FFFF
+        return self.state
+
+    def randint(self, n: int) -> int:
+        return self.next() % n
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# IP ↔ seed_B 変換（正本は manga.py。N-17 で一本化）
+# ═══════════════════════════════════════════════════════════════════════
+# 以前はこのファイルにも同じ変換が複製されていて、IPv6 の扱いが
+# 食い違っていた (こちらは例外、manga 側は MD5 由来の値)。
+# 変換の正本は manga.ip_to_seed_b / manga.seed_b_to_ip とし、ここでは
+# 互換のための薄い委譲だけを残す。manga はこのモジュールを import
+# するため、循環を避けて関数の中で遅延 import する。
+# IPv6 の決めごと: seed_B は MD5 由来の32bit値になり、IP そのものは
+# 埋まらない (QR に入るのも seed_B の hex で、IP の hex ではない)。
+# qr_mark.make_qr_mark の seed_b=None 分岐 (IP を直接埋める形) は、
+# 単体で呼ぶ場合のためのもので、配信経路からは使われない。
+
+def ip_to_seed_b(ip: str) -> int:
+    from manga import ip_to_seed_b as _impl
+    return _impl(ip)
+
+
+def seed_b_to_ip(seed_b: int) -> str:
+    from manga import seed_b_to_ip as _impl
+    return _impl(seed_b)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 配置ユーティリティ
+# ═══════════════════════════════════════════════════════════════════════
+
+class _PlacedRect(NamedTuple):
+    x: int
+    y: int
+    w: int
+    h: int
+
+
+def _overlaps(a: _PlacedRect, b: _PlacedRect, padding: int = 4) -> bool:
+    return not (
+        a.x + a.w + padding <= b.x or
+        b.x + b.w + padding <= a.x or
+        a.y + a.h + padding <= b.y or
+        b.y + b.h + padding <= a.y
+    )
+
+
+def _place_in_band(
+    rng: Xorshift32,
+    item_w: int,
+    item_h: int,
+    band_x0: int,
+    band_y0: int,
+    band_x1: int,
+    band_y1: int,
+    placed: list[_PlacedRect],
+    margin: int = 6,
+    max_tries: int = 40,
+) -> _PlacedRect | None:
+    max_x = band_x1 - item_w - margin
+    max_y = band_y1 - item_h - margin
+    if max_x < band_x0 + margin or max_y < band_y0 + margin:
+        return None
+    for _ in range(max_tries):
+        x = band_x0 + margin + rng.randint(max(1, max_x - band_x0 - margin))
+        y = band_y0 + margin + rng.randint(max(1, max_y - band_y0 - margin))
+        rect = _PlacedRect(x, y, item_w, item_h)
+        if not any(_overlaps(rect, p) for p in placed):
+            return rect
+    return None
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# メイン API
+# ═══════════════════════════════════════════════════════════════════════
+
+def embed_watermarks(
+    img: Image.Image,
+    seed_b: int,
+    client_ip: str,
+    page_index: int = 0,
+    *,
+    dt: datetime | None = None,
+    qr_count: int = 3,
+    qr_scale: int = 3,
+    qr_opacity: float = 0.50,
+    text_font_size: int = 18,
+    text_opacity: float = 1.0,
+    text_color: tuple[int, int, int] = (0, 0, 0),
+    border_ratio: float = 0.10,
+    font_path: Path = HIERO_FONT_PATH,
+) -> Image.Image:
+    """
+    scramble(seed_B) 適用済み画像の不動エリア（上下 border_ratio）に透かしを埋め込む。
+
+    ヒエログリフフォントが未インストールの場合は QR のみ埋め込んで続行する。
+
+    Parameters
+    ----------
+    img        : scramble(seed_B) 後の画像
+    seed_b     : ip_to_seed_b(client_ip) で得た値
+    client_ip  : クライアントの IPv4 アドレス文字列
+    qr_count   : QR を配置する個数
+    qr_scale   : QR モジュール 1つあたりの px
+    qr_opacity : QR の不透明度
+    text_font_size : ヒエログリフのフォントサイズ（px）
+    text_opacity   : ヒエログリフの不透明度
+    text_color     : ヒエログリフの RGB カラー
+    border_ratio   : 不動エリアの割合（デフォルト 0.10 = 上下10%）
+    font_path      : Noto Sans Egyptian Hieroglyphs の .ttf パス
+    """
+    result = img.convert("RGBA")
+    W, H = result.size
+
+    band_h      = int(H * border_ratio)
+    top_band    = (0, 0, W, band_h)
+    bottom_band = (0, H - band_h, W, H)
+
+    rng    = Xorshift32(seed_b ^ 0xC0FFEE42 ^ page_index)
+    placed: list[_PlacedRect] = []
+
+    # IPv4かどうか（RFVP-64はIPv4のみ対応）
+    try:
+        socket.inet_aton(client_ip)
+        is_ipv4 = True
+    except OSError:
+        is_ipv4 = False
+
+    # ── RFVP-64 アバターを上下バンドのいずれかに配置（IPv4のみ） ──────
+    if is_ipv4:
+        try:
+            rfvp_img = _rfvp64.encode(client_ip)
+            rw, rh   = rfvp_img.size
+            for band in [top_band, bottom_band]:
+                rect = _place_in_band(rng, rw, rh, *band, placed)
+                if rect is not None:
+                    placed.append(rect)
+                    result.alpha_composite(rfvp_img, dest=(rect.x, rect.y))
+                    break
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("RFVP-64をスキップ: %s", e)
+
+    # ── QR を qr_count 個配置（IPv4: seed_b hex8文字 / IPv6: hex32文字） ──
+    try:
+        qr_mark = _get_cached_qr(seed_b, client_ip, scale=qr_scale, opacity=qr_opacity)
+        qw, qh  = qr_mark.size
+        for i in range(qr_count):
+            band = top_band if i % 2 == 0 else bottom_band
+            rect = _place_in_band(rng, qw, qh, *band, placed)
+            if rect is None:
+                continue
+            placed.append(rect)
+            result.alpha_composite(qr_mark, dest=(rect.x, rect.y))
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("QRをスキップ: %s", e)
+
+    # ── ヒエログリフ配置（日時情報・IPv4/IPv6共通・フォントなし環境はスキップ） ──
+    try:
+        hiero_mark = _get_cached_hiero(
+            dt if dt is not None else datetime.now(tz=timezone.utc),
+            font_size=text_font_size,
+            opacity=text_opacity,
+            color=text_color,
+            font_path=font_path,
+        )
+        tw, th = hiero_mark.size
+        for band in [bottom_band, top_band]:
+            rect = _place_in_band(rng, tw, th, *band, placed)
+            if rect is not None:
+                placed.append(rect)
+                result.alpha_composite(hiero_mark, dest=(rect.x, rect.y))
+                break
+    except OSError as e:
+        import logging
+        logging.getLogger(__name__).info("ヒエログリフをスキップ: %s", e)
+
+    return result
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 動作確認
+# ═══════════════════════════════════════════════════════════════════════
+
+if __name__ == "__main__":
+    # 動作確認 (N-18 で現在の関数に合わせて書き直し)。
+    # 使い方: python watermark.py [IP] [入力画像パス]
+    # 保存先は相対パス (実行したフォルダ) を使う。
+    import sys
+    from manga import ip_to_seed_b as manga_ip_to_seed_b
+    from manga import seed_b_to_ip as manga_seed_b_to_ip
+    from hiero_mark import datetime_to_hiero, hiero_to_datetime
+
+    TEST_IP  = sys.argv[1] if len(sys.argv) > 1 else "192.168.1.100"
+    TEST_IMG = sys.argv[2] if len(sys.argv) > 2 else None
+
+    seed_b = manga_ip_to_seed_b(TEST_IP)
+
+    print(f"IP      : {TEST_IP}")
+    print(f"seed_B  : {seed_b:#010x}")
+    print(f"QR data : {hex(seed_b)[2:].upper().zfill(8)}")
+
+    # ヒエログリフは「日時」の往復を確認する (IP の変換ではない)
+    now   = datetime.now(tz=timezone.utc)
+    hiero = datetime_to_hiero(now)
+    back  = hiero_to_datetime(hiero)
+    print(f"hiero   : {hiero}  ({len(hiero)} chars)")
+    assert int(back.timestamp()) == int(now.timestamp())
+    print("ヒエログリフ日時の往復テスト: OK")
+
+    # seed_B の往復は IPv4 のみ (IPv6 は MD5 由来で不可逆)
+    try:
+        socket.inet_aton(TEST_IP)
+        assert manga_seed_b_to_ip(seed_b) == TEST_IP
+        print("seed_B の往復テスト: OK")
+    except OSError:
+        print("seed_B の往復テスト: IPv6 のためスキップ")
+
+    if TEST_IMG:
+        out_path = Path(TEST_IMG).stem + "_watermarked.png"
+        with Image.open(TEST_IMG) as base:
+            result = embed_watermarks(base, seed_b, TEST_IP)
+        result.save(out_path, "PNG", compress_level=6)
+        print(f"保存: {out_path}")
+    else:
+        dummy  = Image.new("RGB", (1200, 1800), (255, 255, 255))
+        result = embed_watermarks(dummy, seed_b, TEST_IP)
+        result.save("watermark_test.png", "PNG", compress_level=6)
+        print("テスト画像保存: watermark_test.png")

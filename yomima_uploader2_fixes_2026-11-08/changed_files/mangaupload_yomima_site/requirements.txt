@@ -1,0 +1,23 @@
+# 段階1 (N-1): 版を固定する。
+# passlib 1.7.4 は bcrypt 5.x と組み合わせると hash() が全パスワードで
+# 例外になり、新規環境で登録が 500 になる (監査 R-1)。
+# bcrypt は passlib と両立する 4.0.1 に固定する。
+# その他も監査用 venv で動作確認できた版にピン留めした
+# (2026-11-08、登録→ログインの実測済み)。
+fastapi==0.162.2
+uvicorn[standard]==0.54.0
+jinja2==3.1.6
+python-multipart==0.0.33
+requests==2.34.2
+Pillow==13.0.0
+rarfile==4.5
+natsort==8.4.0
+passlib==1.7.4
+bcrypt==4.0.1
+httpx==0.28.1
+email_validator==2.3.0
+python-jose==3.5.0
+sqlalchemy==2.1.8
+slowapi==0.1.10
+numpy==2.5.4
+segno==1.6.6
